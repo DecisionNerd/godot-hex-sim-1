@@ -2,15 +2,17 @@
 
 ## Personas
 
-- [persona-steward.md](persona-steward.md) — player controlling an actor on the map
+- [persona-steward.md](persona-steward.md) - player controlling an actor on the map
 
 ## First session (current)
 
 | Step | Action |
 |---|---|
-| 1 | See hex map |
-| 2 | Click a farm plot — farmer walks there |
-| 3 | Plant / tend / harvest — spend labor |
-| 4 | Space — end day |
+| 1 | Start Homestead Act settlement scenario |
+| 2 | Choose or confirm claim site |
+| 3 | Click or box-select hexes |
+| 4 | Assign chores: gather, clear, haul water, trap, build, field |
+| 5 | Work day or end day |
+| 6 | Read resource/weather/survival changes |
 
-Person resolution and scale view — planned.
+Independent AI agents, deeper politics, and technology diffusion are planned.

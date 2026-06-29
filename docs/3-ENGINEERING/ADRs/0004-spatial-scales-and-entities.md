@@ -40,5 +40,5 @@ over the same grid.
 
 ## References
 
-- `docs/2-REQUIREMENTS.md` — FR-S*, FR-A*
-- [ADR-0005](0005-sim-aggregate-render-split.md) — simulation vs aggregation vs rendering
+- `docs/2-REQUIREMENTS.md` - spatial bucket and agent requirements
+- [ADR-0005](0005-sim-aggregate-render-split.md) - simulation vs aggregation vs rendering

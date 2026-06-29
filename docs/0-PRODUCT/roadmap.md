@@ -1,41 +1,59 @@
 # Roadmap
 
-## Phase 0 — Farming family (done)
+The roadmap grows from a playable homestead survival loop into a broader frontier-agent sim. Each
+phase should leave the game playable; future systems should reuse the same agent, resource, and
+scenario foundations.
 
-- [x] Turn-based days (2 labor actions per day)
-- [x] Seasons (91 days each) and weather
-- [x] Resources: food, wheat seed, barley seed
-- [x] Crops with attributes (seasons, grow time, yield, frost tolerance)
-- [x] Labor: plant, tend, harvest; click-to-select plots (free walk)
-- [x] Household food consumption (2 food / 7 days)
-- [x] Start screen, options shell, 1280×720 window
-- [x] Plot selection highlight
-- [x] Hunger lose condition
-- [x] Save / load
-- [x] CI test run
+## Phase 0 - Homestead Survival Foundation (mostly done)
 
-## Phase 1 — Family members (done)
+- [x] Turn-based days, seasons, weather, and food consumption
+- [x] American West framing and first Homestead Act scenario shell
+- [x] Chores: gather, clear brush, haul water, trap, build shelter, field work
+- [x] Household/person scaffold with deterministic behavior
+- [x] Claims/holding expansion scaffold
+- [x] Save/load and migration path
+- [x] Hex map, spatial buckets, zoom renderer, and 3D terrain view
+- [x] Box selection, rotation, zoom, and pan controls
+- [ ] Better first-session explanation of why chores, resources, and survival outcomes change
 
-- [x] Persons in household (seeded RNG — spouse & child tend on drought/frost)
-- [x] Family labor helps tend (end of day, no action cost)
-- [x] Expand the holding (claim adjacent wild hexes)
+## Phase 1 - Playable Frontier Logic
 
-## Phase 2 — County scale (foundation done)
+- [ ] Clarify resource ledger: provisions, water, fuelwood, lumber, tools, seed, cash
+- [ ] Make shelter, water access, weather exposure, and field work easier to read
+- [ ] Add basic market/trader flow with scenario-dependent prices and availability
+- [ ] Add household health/risk outcomes tied to food, water, shelter, weather, and work
+- [ ] Improve action failure messages: missing resource, unsuitable hex, season, labor, or skill
+- [ ] Add simple events grounded in homestead life: illness, animal loss, tool breakage, storms,
+  neighbors, debt, claim pressure
 
-- [x] Spatial bucket IDs at map build (`patch_id`, `block_id`, `zone_id`)
-- [x] Dirty aggregate cache (patch → block → zone)
-- [x] Zoom-based renderer (scroll wheel: hex / patch / block / zone)
-- [x] Multiple holdings + neighbor agent (Miller holding)
-- [x] Rename Unit → Actor
+## Phase 2 - Independent Agents
 
-## Next
+- [ ] Give neighbor holdings goals, stores, labor, and survival needs
+- [ ] Let AI agents choose chores using the same action model as the player
+- [ ] Add trade, help, competition, conflict, and reputation effects between agents
+- [ ] Store agent memory: trust, debt, favors, prior conflict, reliability
+- [ ] Make agent failure possible: abandonment, sale, merger, death, relocation
 
-- [ ] Hex-neighbor propagation (disease, etc.)
-- [ ] Agent AI for neighbor holdings
-- [ ] Options screen (volume, fullscreen)
-- [ ] Larger county map
+## Phase 3 - Skills, Technology, And Institutions
 
-## Not now
+- [ ] Add skills that affect action speed, yield, risk, information, and diplomacy
+- [ ] Add technology availability by scenario time/place instead of a universal tech tree
+- [ ] Model technology spread through markets, institutions, migration, and contact
+- [ ] Add institutional hooks: land office, courts, church/community, military, traders, tribal
+  authority, territorial/state government
+- [ ] Add scenario-specific law/politics and reputation consequences
 
-- County-wide economy, armies, full disease sim
+## Phase 4 - Richer Scenarios
+
+- [ ] Deepen Homestead Act settlement with legal, economic, and social pressures
+- [ ] Add scenarios from other periods in the 1540-1890 frame
+- [ ] Support scenario-specific institutions, technology context, political relationships, and
+  starting resources
+- [ ] Add case-study-informed mechanics without turning the game into biography
+
+## Not Now
+
 - Multiplayer
+- Full continental economy or grand-strategy war model
+- Deterministic recreation of named historical events
+- Unbounded tech-tree or RPG-system complexity before the homestead loop is readable

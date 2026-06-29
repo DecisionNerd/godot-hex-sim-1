@@ -1,35 +1,63 @@
 # Experiences
 
-Hex map, turns, actors you control, persons that roll on turn end. Zoom out → patches, blocks,
-zones (same world, simpler drawing).
+The player should feel like they are managing a fragile frontier situation: a household, holding,
+or agent has limited labor and knowledge, lives in a particular landscape, and makes daily choices
+with seasonal and political consequences.
 
-## Key experiences
+## Key Experiences
 
-### Select plot and work (done)
+### Survive The Claim (partial)
 
-- **Given** labor left → **When** click a farm plot → **Then** plot selected, farmer walks there (free)
-- **Given** plot selected → **When** plant / tend / harvest → **Then** consume one labor action
+- **Given** scarce provisions, water, labor, and weather
+- **When** the player assigns chores and ends days
+- **Then** the household either stabilizes the claim or slides toward hunger, exposure, debt, or
+  abandonment
 
-### End day (done)
+### Select Land And Assign Work (done)
 
-### Zoom the map (planned)
+- **Given** a map of hexes
+- **When** the player clicks or drags a box
+- **Then** selected hexes can receive chores such as gather, clear, haul water, build, trap, or
+  field work
 
-> **As a** player  
-> **I want** zoom to change detail, not a different world  
-> **So that** I see hexes up close and zones when far out
+### Build A Holding (partial)
 
-- **Given** the county map
-- **When** I zoom in or out
-- **Then** renderer shows hexes, patches, blocks, or zones from the same sim data
+- **Given** a viable home hex and nearby resources
+- **When** days and seasons pass
+- **Then** the player can turn wild land into shelter, fields, water access, fuelwood, stores, and
+  a more resilient household economy
 
-### See spread on the map (planned)
+### Read The Land (partial)
 
-- **Given** disease (or similar) on a hex
-- **When** turns pass
-- **Then** neighbor hexes change first; patch/block/zone summaries update after the tick
+- **Given** elevation, water, vegetation, cliffs, fields, and structures
+- **When** the player changes zoom, rotates, or enters terrain view
+- **Then** the same underlying map becomes readable at hex, patch, block, zone, or terrain scale
 
-## Principles
+### Meet Independent Agents (planned)
 
-- Sim on hexes; summaries are derived
-- Deterministic persons (seeded)
-- Simple
+- **Given** neighboring households, traders, indigenous communities, officials, churches, guides,
+  militias, and other frontier actors
+- **When** agents pursue their own needs
+- **Then** the player faces trade, competition, assistance, conflict, rumor, and reputation effects
+
+### Grow By Skill And Relationship (planned)
+
+- **Given** repeated work, travel, contact, and crisis
+- **When** the player chooses how agents spend time
+- **Then** skills, local knowledge, languages, reputation, trust, and institutions change what is
+  possible
+
+### Encounter Technology Over Time (planned)
+
+- **Given** a scenario date and place
+- **When** years pass or market/contact conditions change
+- **Then** new tools, transport, weapons, crops, building methods, communication, and institutions
+  spread plausibly instead of unlocking from a universal tech tree
+
+## Experience Principles
+
+- The map is the primary interface.
+- The player should understand why resources changed.
+- Agents use the same core rules whether controlled by player or AI.
+- Plausibility matters more than breadth.
+- History is context and constraint, not trivia pasted onto generic mechanics.

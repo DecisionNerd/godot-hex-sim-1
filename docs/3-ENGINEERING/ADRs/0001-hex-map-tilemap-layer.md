@@ -41,9 +41,9 @@ overrides in a runtime `GameState` when needed.
 
 - Couples visual tileset to sim schema unless custom data is designed carefully
 - Large counties may need chunking or performance tuning
-- Demo tiles are generic, not medieval-specific
+- Demo tiles are generic, not frontier-specific
 
 ## References
 
-- `tileset.tres`, `scenes/main.tscn`
-- `docs/3-ARCHITECTURE.md` — Data model, Godot built-ins
+- `scenes/game.tscn`, `scenes/settlement.tscn`
+- `docs/3-ARCHITECTURE.md` - Data model, Godot built-ins

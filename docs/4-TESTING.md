@@ -20,7 +20,7 @@ In the editor: **Project → Tools → GUT** (after plugin enabled).
 
 | Layer | Tool | Scope |
 |---|---|---|
-| Unit | GUT | Calendar, farming, food, turns, RNG |
+| Unit | GUT | Calendar, survival resources, farming, turns, RNG, terrain layout |
 | Manual | Godot F5 | Map, UI, input |
 
 ## Coverage
@@ -29,17 +29,28 @@ In the editor: **Project → Tools → GUT** (after plugin enabled).
 |---|---|
 | `PlotState` | empty, mature, clear |
 | Calendar | day-in-season, season/year rollover |
-| Farming | plant, harvest, frost, drought, actionable work |
-| Food | 7 days ≈ 2 food consumed |
+| Farming/survival | plant, harvest, frost, drought, actionable work, trade |
+| Food | daily consumption accumulator |
 | `TurnManager` | actions, advance days, skip-to-work |
-| Weather RNG | same seed → same sequence |
+| Weather RNG | same seed gives same sequence |
+| Scenario/theme | active scenario, calendar year, west resource names |
+| Terrain | layout, picking, scene boot |
 
 ## Manual checks
 
-Godot 4.7 → F5 → `scenes/main.tscn` — select plot, plant/tend/harvest, end day, Shift+Space skip-to-work.
+Godot 4.7 -> F5 -> start screen -> New Game.
+
+Check:
+
+- claim selection scene loads
+- left-click and left-drag selection work
+- Q/E rotate, R/F zoom, WASD pan, right-drag pan
+- V toggles map/terrain view
+- chores can be assigned to selected hexes
+- Work day and End day update resources/logs without script errors
 
 ## Test helpers
 
-- `GameState.reset_for_test(seed)` — isolated farm state
-- `GameState.resolve_day(n)` — end-of-day sim without UI
-- `TurnManager.reset_for_test()` — reset turn counter and actions
+- `GameState.reset_for_test(seed)` - isolated game state
+- `GameState.resolve_day(n)` - end-of-day sim without UI
+- `TurnManager.reset_for_test()` - reset turn counter and actions

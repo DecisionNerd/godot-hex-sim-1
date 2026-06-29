@@ -10,10 +10,10 @@ Accepted
 
 ## Context
 
-The Godot hex demo uses `CharacterBody2D` with `move_and_slide()` for real-time movement. Hex Sim
-is a **management sim** at ~10 m hex scale: the player assigns **labor** (plant, tend, harvest)
-per day. A farmer can cross hundreds of hexes per day — **walking is visual only**, not a
-resource cost.
+The Godot hex demo uses `CharacterBody2D` with `move_and_slide()` for real-time movement. Valley
+Claim is a turn-based management/survival sim at ~10 m hex scale: the player assigns **labor**
+and chores per day. A worker can cross many hexes in a day; walking is visual feedback, not the
+main resource cost.
 
 Alternatives:
 
@@ -23,9 +23,9 @@ Alternatives:
 
 ## Decision
 
-Represent the household member as **`Node2D` at hex centers** — **no physics bodies or
-`move_and_slide`**. Click a farm plot to select it; `walk_to()` tweens the sprite for feedback.
-Only farm labor calls `TurnManager.consume_action()`.
+Represent actors as **`Node2D` at hex centers** with no physics bodies or `move_and_slide`.
+Click/drag selects hexes; chores and work zones consume labor. Movement feedback can be visual,
+but day-scale work remains the cost.
 
 ## Consequences
 
@@ -42,6 +42,6 @@ Only farm labor calls `TurnManager.consume_action()`.
 
 ## References
 
-- `scripts/units/unit.gd` — `walk_to()`, `_snap_to_hex`
-- `scripts/game/main.gd` — plot selection, labor buttons
+- `scripts/units/actor.gd` - actor visual behavior
+- `scripts/game/game.gd` - selection, input, and chore buttons
 - Removed demo files: `troll.gd` (CharacterBody2D)

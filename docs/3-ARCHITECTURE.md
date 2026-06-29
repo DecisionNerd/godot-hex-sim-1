@@ -1,27 +1,117 @@
 # Architecture
 
-Offline Godot 4 game: one **hex simulation** (L0), **aggregate caches** (L1–L3), **zoom-based
-rendering**. Turn loop + actors + persons. No server, no physics.
+Offline Godot 4 game with one authoritative hex simulation, scenario-specific rules, independent
+agents, resource/economy systems, and zoom/terrain renderers. No server and no physics-driven
+gameplay.
 
-Three separate jobs:
+## Layers
 
-| Job | Where | Rule |
-|---|---|---|
-| **Simulation** | L0 hexes only | All propagation (disease, movement, etc.) is hex → neighbor hex |
-| **Aggregation** | L1 patch, L2 block, L3 zone | Cached summaries; recomputed when hexes change |
-| **Rendering** | Camera zoom | Draw hexes, patches, blocks, or zones — one map, no duplicate tiles |
+| Layer | Role |
+|---|---|
+| Scenario | Date, place, persona, starting state, institutions, available technology |
+| Agent model | Player and AI actors choose from the same action vocabulary |
+| Daily sim | Labor, chores, household needs, weather, fields, structures, risk |
+| Hex sim | Authoritative L0 map state and neighbor-local rules |
+| Aggregates | Dirty patch/block/zone summaries for zoomed rendering and future regional logic |
+| Render/UI | Map view, 3D terrain view, selection, logs, controls, action panel |
 
+```text
+ScenarioCatalog
+      |
+      v
+GameState -> TurnManager -> Work / Persons / Resources
+      |              |
+      |              v
+      |        HexSim (L0 authoritative)
+      |              |
+      v              v
+MapRenderer <- AggregateCache <- dirty hex changes
+TerrainView <- elevation + hex state
 ```
-Player → UI → TurnManager → Actors / Persons
-                          → HexSim (L0 only)
-                          → AggregateCache (dirty L1→L3)
-                          → MapRenderer (zoom → level)
+
+## Scenario Layer
+
+A scenario is the entry point for historical context and rule variation.
+
+```text
+id, title, persona_label, place_name, start_year,
+opening_log, menu_blurb, settlement_title,
+initial_resources, institutions, technology_context, scenario_rules
 ```
 
-## Spatial buckets (not hex clusters)
+The first scenario is Homestead Act settlement. Later scenarios can reuse the same agent, resource,
+and map systems while changing constraints: who has legal standing, who controls access, what
+markets exist, what technologies have spread, and what relationships already matter.
 
-The hierarchy is **fixed spatial buckets** over a single hex grid. Do **not** nest hex shapes inside
-hex shapes.
+## Agent Model
+
+Actors represent decision-making agents. The player is one actor; AI households, traders,
+communities, officials, or guides can be actors later.
+
+| Entity | Scope |
+|---|---|
+| `Actor` | Chooses explicit actions; may be player-controlled or AI-controlled |
+| `Person` | Individual with health, skill, relationships, and seeded outcomes |
+| `Holding` | Land, structures, stores, obligations, reputation, and claims |
+| `WorkZone` | Chore assignment over one or more hexes |
+
+The target design is actor parity: if the player can assign work, trade, negotiate, migrate, or
+invest in skill, AI agents should eventually use the same underlying action model.
+
+## Daily Turn Flow
+
+```text
+1. Player and AI actors choose or maintain work zones/actions
+2. Work consumes labor and changes hexes, structures, fields, or resources
+3. Persons contribute skill, household help, risk, illness, or events
+4. Weather, food, water, shelter, and field growth resolve
+5. Local hex changes mark aggregate buckets dirty
+6. Logs/UI explain the important changes
+7. turn_number++
+```
+
+Movement across 10 m hexes is not the main cost. Time, labor, tools, weather, skill, terrain,
+relationships, and institutions are the costs.
+
+## Resources And Economics
+
+Resources are not only inventory numbers. They are the material state of a holding.
+
+```text
+provisions, water, fuelwood, lumber, tools, seed, animals,
+cash/debt, shelter, fields, reputation, claims, obligations
+```
+
+Economics should be built as flows:
+
+```text
+land + labor + skill + weather + tools -> production
+production -> consumption + storage + trade + loss
+trade/debt/obligation -> future constraints and opportunities
+```
+
+Markets should be scenario-dependent. A homesteader near a town, mission, fort, reservation,
+railhead, river crossing, or trail should face different prices, access, risk, and politics.
+
+## Skills And Technology
+
+The game should not use a universal abstract tech tree. Progression is mostly:
+
+- learned skill
+- household capacity
+- relationships and trust
+- local knowledge
+- reputation and standing
+- access to institutions and markets
+
+Technology spreads by scenario context, time, place, trade routes, institutions, migration,
+neighbors, and capital. New tools should create tradeoffs: cost, maintenance, training,
+dependence, debt, supply, or political exposure.
+
+## Spatial Buckets (Not Hex Clusters)
+
+The hierarchy is fixed spatial buckets over a single hex grid. Do not nest hex shapes inside hex
+shapes.
 
 | Level | Name | Size |
 |---|---|---|
@@ -30,7 +120,7 @@ hex shapes.
 | L2 | block | 1 km |
 | L3 | zone | 10 km |
 
-At **map generation**, each hex gets permanent bucket IDs:
+At map generation, each hex gets permanent bucket IDs:
 
 ```text
 hex.patch_id
@@ -38,187 +128,100 @@ hex.block_id
 hex.zone_id
 ```
 
-Each hex belongs to exactly one patch, one block, and one zone. IDs are never inferred at runtime
-from neighbor topology — only from the bucket assignment baked into the map.
+Each hex belongs to exactly one patch, one block, and one zone. IDs are saved with the map.
 
-## Simulation (L0 only)
+## Hex Simulation
 
-Hexes are the **authoritative state**. All spread and local rules run here.
+Hexes are the authoritative terrain and local-state layer. All spread and local rules run on L0
+hexes and neighbor hexes only. The hierarchy is not a propagation path.
 
-Example — disease:
+Examples:
 
-```text
-Hex A (infected)
-   ↓
-Neighbor hexes
-   ↓
-Neighbor hexes
-```
+- fire, disease, forage depletion, water flow, road improvement, fence/building impact
+- local ownership/claim effects
+- vegetation, field, and structure state
 
-Only hex data changes during the tick. The hierarchy is **not** part of the propagation path.
+## Aggregation
 
-**Turn end (sim order):**
+L1-L3 store derived summaries. After hex changes:
 
 ```text
-1. Actors take explicit actions
-2. Persons resolve (seeded RNG, fixed order)
-3. Hex sim tick (spread, work, etc.) — hex → hex only
-4. Flush dirty aggregates (see below)
-5. turn_number++
-```
-
-## Aggregation (cache, not simulation)
-
-L1–L3 store the **same field names** as hexes, derived from children below.
-
-| Field | Hex rule | Patch rule | Block / zone rule |
-|---|---|---|---|
-| `population` | source | `SUM(hex)` | `SUM(patch)` / `SUM(block)` |
-| `food` | source | `SUM` | `SUM` |
-| `forest` | source | `AVG` | `AVG` |
-| `terrain` | source | `majority` | `majority` |
-| `owner` | source | `majority` | `majority` |
-| `passable` | source | `all` | `all` |
-| `road_level` | source | `max` | `max` |
-| `water` | source | `SUM` or `AVG` | same fn as patch |
-| `disease` | source | `SUM` or `max` | same fn as patch |
-| `armies` | source | `SUM` | `SUM` |
-
-Define one aggregation function per field; reuse at every level.
-
-**Never propagate through the hierarchy for simulation.** After hex changes:
-
-```text
-Changed hexes
-      ↓
-Recompute affected patch(es)
-      ↓
-Recompute affected block(s)
-      ↓
-Recompute affected zone(s)
-```
-
-### Dirty updates
-
-Do not recompute the whole map every tick.
-
-When a hex changes:
-
-```text
-Hex dirty → patch dirty → block dirty → zone dirty
+changed hexes -> dirty patches -> dirty blocks -> dirty zones
 ```
 
 End of tick:
 
 ```text
-for each dirty patch:   aggregate from its hexes
-for each dirty block:   aggregate from its patches
-for each dirty zone:    aggregate from its blocks
+for each dirty patch: aggregate from hexes
+for each dirty block: aggregate from patches
+for each dirty zone: aggregate from blocks
 clear dirty sets
 ```
 
+Aggregation supports rendering and future regional reasoning. It does not replace L0 simulation.
+
 ## Rendering
 
-No separate map per zoom level. One simulation; renderer picks granularity.
+One simulation map; multiple views.
 
-| Zoom | Draw |
+| View | Source |
 |---|---|
-| Near | L0 hexes (visible window only) |
-| Medium | L1 — one tile per patch |
-| Far | L2 — one tile per block |
-| Strategic | L3 — one tile per zone |
+| Hex map | L0 hex state |
+| Patch/block/zone map | aggregate cache |
+| Terrain view | same L0 elevation and hex state, rendered as 3D mesh |
+
+The renderer reads state. It does not simulate.
+
+## Data Model Direction
 
 ```text
-current_zoom → pick level → read aggregate or hex buffer → draw
+Hex:
+  coords, elevation, terrain, water, vegetation, field, structure,
+  claim/owner, work zones, patch_id, block_id, zone_id
+
+Actor:
+  id, controller, current_hex, holding_id, goals, action_policy
+
+Person:
+  id, household/agent, health, skills, traits, relationships, current_hex
+
+Holding:
+  id, owner_actor_id, home_hex, claimed_hexes, stores, structures,
+  debt, reputation, obligations, legal_status
+
+Scenario:
+  id, date/place/persona, opening state, institutions, technology context,
+  market access, political context, scenario rules
 ```
 
-Predictable cost:
-
-| Zoom | Rough draw count |
-|---|---|
-| Hex | Many (cull to viewport) |
-| Patch | Thousands |
-| Block | Hundreds |
-| Zone | Dozens |
-
-Patch/block/zone tiles can be simple colored quads or one atlas tile per bucket — still sourced
-from aggregate data, not a second authored map.
-
-## Entities
-
-### Actor
-
-Player or agent. Shown at `hex_coords` on the map. **Labor** (plant, tend, harvest) consumes
-the daily budget. Walking between plots is free — at 10 m/hex a worker crosses hundreds of tiles
-per day.
-
-### Person
-
-Non-player. `hex_coords`, rules `{ action, probability }`. On turn end: seeded `rng.randf()` vs
-probabilities; stable sort order by id.
-
-### RNG
-
-One `RandomNumberGenerator` on `GameState` (planned). Person rolls only. Save includes seed.
-
-## Components
+## Godot Components
 
 | Component | Role |
 |---|---|
-| `TurnManager` | Turn #, actions, signals |
-| `main.gd` | Input, HUD |
-| `Unit` → `Actor` | L0 position, visual walk (rename planned) |
-| `TileMapLayer` | L0 visuals (hex zoom) |
-| **`HexSim`** (planned) | L0 state + hex-neighbor propagation |
-| **`AggregateCache`** (planned) | patch/block/zone structs, dirty flush |
-| **`MapRenderer`** (planned) | Zoom → draw level |
-| **`GameState`** (planned) | Seed, bucket maps, entity lists |
-| **`PersonSystem`** (planned) | End-turn person rolls |
+| `GameState` | World state, resources, saves, scenario state |
+| `TurnManager` | Turn number, day advancement, signals |
+| `HexSim` | L0 map state |
+| `AggregateCache` | Dirty patch/block/zone summaries |
+| `MapRenderer` | 2D map render by zoom level |
+| `TerrainView` | 3D terrain view from hex elevation |
+| `WorkZone` | Multi-hex chore assignments |
+| `PersonSystem` | Household/person contribution and seeded outcomes |
+| `ScenarioCatalog` | Available scenario definitions |
 
-## Data model
-
-**Hex (L0)** — authoritative:
-
-```text
-coords, patch_id, block_id, zone_id
-terrain, population, food, ownership, roads, forest, water, disease, armies, passable, ...
-```
-
-**Patch / block / zone** — cached aggregates, same keys, plus `dirty: bool`.
-
-**Actor:** `id`, `hex`, `is_player`, `is_agent`
-
-**Person:** `id`, `hex`, `rules: [{ action, p }]`
-
-## Key flows
-
-### Select plot + labor (done)
-
-Click farm plot → `local_to_map` → select → `walk_to()` (free tween). Plant/tend/harvest →
-`consume_action()` on selected plot.
-
-### Sim + aggregate (planned)
-
-Disease on hex A → spread to neighbor hexes → each changed hex marks patch/block/zone dirty →
-end tick flush aggregates.
-
-## Godot pieces
-
-`TileMapLayer` (hex view), autoloads, signals, `Resource`, seeded RNG, `Camera2D` zoom for level
-pick, optional second draw path for patch/block/zone quads.
-
-Avoid: physics, NavigationAgent2D, multiplayer, separate TileMaps per zoom.
+Avoid: physics-driven gameplay, multiplayer, separate authored maps per zoom level, or a single
+hardcoded campaign timeline.
 
 ## Decisions
 
-- [ADR-0001 — Hex map via TileMapLayer](3-ENGINEERING/ADRs/0001-hex-map-tilemap-layer.md)
-- [ADR-0002 — Turn-based, no physics](3-ENGINEERING/ADRs/0002-turn-based-no-physics.md)
-- [ADR-0003 — TurnManager autoload](3-ENGINEERING/ADRs/0003-turn-manager-autoload.md)
-- [ADR-0004 — Spatial buckets and entities](3-ENGINEERING/ADRs/0004-spatial-scales-and-entities.md)
-- [ADR-0005 — Hex sim, aggregate cache, zoom render](3-ENGINEERING/ADRs/0005-sim-aggregate-render-split.md)
+- [ADR-0001 - Hex map via TileMapLayer](3-ENGINEERING/ADRs/0001-hex-map-tilemap-layer.md)
+- [ADR-0002 - Turn-based, no physics](3-ENGINEERING/ADRs/0002-turn-based-no-physics.md)
+- [ADR-0003 - TurnManager autoload](3-ENGINEERING/ADRs/0003-turn-manager-autoload.md)
+- [ADR-0004 - Spatial buckets and entities](3-ENGINEERING/ADRs/0004-spatial-scales-and-entities.md)
+- [ADR-0005 - Hex sim, aggregate cache, zoom render](3-ENGINEERING/ADRs/0005-sim-aggregate-render-split.md)
 
 ## Risks
 
-- Bucket assignment must be stable and saved with the map
-- Dirty flush order: patches before blocks before zones
-- Renderer and sim must agree on field list per level
+- Historical systems can become shallow if modeled only as bonuses and penalties.
+- AI agents need a constrained action model before they can feel plausible.
+- The UI must explain resource changes without burying the player in ledger detail.
+- Technology diffusion must stay scenario-aware, not become a generic unlock list.
