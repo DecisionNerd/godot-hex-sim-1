@@ -10,5 +10,5 @@ func test_game_scene_boots_without_errors() -> void:
 	add_child_autofree(game)
 	await wait_process_frames(2)
 	assert_false(GameState.game_lost)
-	assert_true(TurnManager.has_actions())
-	assert_false(game.get_node("UI/Panel/Margin/VBox/ActionsRow/PlantWheatBtn").disabled)
+	assert_gt(GameState.labor_pool, 0)
+	assert_false(game.get_node("UI/PlotPanel/Margin/VBox/ActionsRow/PlantWheatBtn").disabled)

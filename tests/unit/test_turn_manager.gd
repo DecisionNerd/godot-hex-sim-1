@@ -8,18 +8,18 @@ func before_each() -> void:
 	TurnManager.reset_for_test()
 
 
-func test_consume_action_decrements_budget() -> void:
-	assert_true(TurnManager.consume_action())
-	assert_eq(TurnManager.actions_remaining, 1)
-	assert_true(TurnManager.consume_action())
-	assert_eq(TurnManager.actions_remaining, 0)
-	assert_false(TurnManager.consume_action())
+func test_labor_pool_sums_household() -> void:
+	GameState.refresh_labor()
+	var expected: int = GameState.LABOR_HEAD + GameState.SPOUSE_LABOR + GameState.CHILD_LABOR
+	assert_eq(GameState.labor_per_day, expected)
+	assert_eq(GameState.labor_pool, GameState.labor_per_day)
 
 
-func test_advance_days_increments_turn() -> void:
+func test_advance_days_increments_turn_and_refreshes_labor() -> void:
+	GameState.labor_pool = 0
 	TurnManager.advance_days(3)
 	assert_eq(TurnManager.turn_number, 4)
-	assert_eq(TurnManager.actions_remaining, TurnManager.actions_per_turn)
+	assert_eq(GameState.labor_pool, GameState.labor_per_day)
 
 
 func test_advance_until_stops_when_work_exists() -> void:

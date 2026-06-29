@@ -1,10 +1,11 @@
 class_name HexGrid
 extends RefCounted
 
-## Coordinate helpers for Godot's stacked-offset hex layout (pointy-top, vertical axis).
-## map_to_local / local_to_map match TileMapLayer for the project's tileset settings.
+## Coordinate helpers for Godot's stacked-offset hex layout (flat-top, vertical axis).
+## map_to_local / local_to_map and hex_corners match TileSet for the project's tileset settings.
 
 const TILE_SIZE := Vector2i(110, 94)
+const HEX_OVERLAP := 0.25
 
 static var _cached_tileset: TileSet
 
@@ -99,3 +100,29 @@ static func local_to_map(local_pos: Vector2) -> Vector2i:
 	else:
 		row = int(round(local_pos.y / h)) - 1
 	return Vector2i(col, row)
+
+
+static func hex_shape_polygon_normalized() -> PackedVector2Array:
+	# Matches TileSet.get_tile_shape_polygon() for hex + vertical offset axis.
+	var overlap := HEX_OVERLAP
+	var horizontal := PackedVector2Array([
+		Vector2(0.0, -0.5),
+		Vector2(-0.5, overlap - 0.5),
+		Vector2(-0.5, 0.5 - overlap),
+		Vector2(0.0, 0.5),
+		Vector2(0.5, 0.5 - overlap),
+		Vector2(0.5, overlap - 0.5),
+	])
+	var out := PackedVector2Array()
+	for point in horizontal:
+		out.append(Vector2(point.y, point.x))
+	return out
+
+
+static func hex_corners(center: Vector2) -> PackedVector2Array:
+	var w := float(TILE_SIZE.x)
+	var h := float(TILE_SIZE.y)
+	var out := PackedVector2Array()
+	for norm in hex_shape_polygon_normalized():
+		out.append(center + Vector2(norm.x * w, norm.y * h))
+	return out

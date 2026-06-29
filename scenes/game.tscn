@@ -21,149 +21,193 @@ z_index = 10
 script = ExtResource("5")
 
 [node name="Camera2D" type="Camera2D" parent="."]
-position = Vector2(640, 360)
+position = Vector2(720, 450)
 physics_interpolation_mode = 2
 
 [node name="UI" type="CanvasLayer" parent="."]
 
-[node name="Panel" type="PanelContainer" parent="UI"]
-clip_contents = true
-anchors_preset = 1
-anchor_left = 1.0
+[node name="TopBar" type="PanelContainer" parent="UI"]
+anchors_preset = 10
 anchor_right = 1.0
-offset_left = -460.0
-offset_bottom = 620.0
-grow_horizontal = 0
+offset_bottom = 76.0
+grow_horizontal = 2
 
-[node name="Margin" type="MarginContainer" parent="UI/Panel"]
+[node name="Margin" type="MarginContainer" parent="UI/TopBar"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 6
+
+[node name="HBox" type="HBoxContainer" parent="UI/TopBar/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="InfoBlock" type="VBoxContainer" parent="UI/TopBar/Margin/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="SeasonLabel" type="Label" parent="UI/TopBar/Margin/HBox/InfoBlock"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Year 1 · Spring · Day 1/91 · Clear"
+
+[node name="ResourcesLabel" type="Label" parent="UI/TopBar/Margin/HBox/InfoBlock"]
+layout_mode = 2
+text = "Food 10 · Wheat seed 6 · Barley seed 6"
+
+[node name="FamilyLabel" type="Label" parent="UI/TopBar/Margin/HBox/InfoBlock"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Family"
+
+[node name="StatusBlock" type="VBoxContainer" parent="UI/TopBar/Margin/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="ActionsLabel" type="Label" parent="UI/TopBar/Margin/HBox/StatusBlock"]
+layout_mode = 2
+text = "Labour today 25 / 25 · Queued: 0"
+
+[node name="HintLabel" type="Label" parent="UI/TopBar/Margin/HBox/StatusBlock"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Click a plot to select it."
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="ZoomLabel" type="Label" parent="UI/TopBar/Margin/HBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Hex view"
+vertical_alignment = 1
+
+[node name="DayRow" type="HBoxContainer" parent="UI/TopBar/Margin/HBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+alignment = 1
+
+[node name="WorkDayBtn" type="Button" parent="UI/TopBar/Margin/HBox/DayRow"]
+layout_mode = 2
+text = "Work"
+
+[node name="EndDayBtn" type="Button" parent="UI/TopBar/Margin/HBox/DayRow"]
+layout_mode = 2
+text = "End day"
+
+[node name="SkipWeekBtn" type="Button" parent="UI/TopBar/Margin/HBox/DayRow"]
+layout_mode = 2
+text = "Skip 7d"
+
+[node name="SkipToWorkBtn" type="Button" parent="UI/TopBar/Margin/HBox/DayRow"]
+layout_mode = 2
+text = "To work"
+
+[node name="MenuRow" type="HBoxContainer" parent="UI/TopBar/Margin/HBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+alignment = 1
+
+[node name="SaveBtn" type="Button" parent="UI/TopBar/Margin/HBox/MenuRow"]
+layout_mode = 2
+text = "Save"
+
+[node name="MenuBtn" type="Button" parent="UI/TopBar/Margin/HBox/MenuRow"]
+layout_mode = 2
+text = "Menu"
+
+[node name="PlotPanel" type="PanelContainer" parent="UI"]
+anchors_preset = 11
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = 76.0
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="UI/PlotPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 12
 
-[node name="VBox" type="VBoxContainer" parent="UI/Panel/Margin"]
+[node name="VBox" type="VBoxContainer" parent="UI/PlotPanel/Margin"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 8
 
-[node name="TitleLabel" type="Label" parent="UI/Panel/Margin/VBox"]
+[node name="PlotTitleLabel" type="Label" parent="UI/PlotPanel/Margin/VBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "Head of household"
+theme_override_font_sizes/font_size = 16
+text = "Selected plot"
 
-[node name="SeasonLabel" type="Label" parent="UI/Panel/Margin/VBox"]
-layout_mode = 2
-text = "Year 1 · Spring · Day 1/91 · Clear"
-
-[node name="ResourcesLabel" type="Label" parent="UI/Panel/Margin/VBox"]
-layout_mode = 2
-text = "Food 10 · Wheat seed 6 · Barley seed 6"
-
-[node name="FamilyLabel" type="Label" parent="UI/Panel/Margin/VBox"]
+[node name="PlotLabel" type="Label" parent="UI/PlotPanel/Margin/VBox"]
 layout_mode = 2
 autowrap_mode = 3
-text = "Family"
+text = "Click a hex on the map."
 
-[node name="PlotLabel" type="Label" parent="UI/Panel/Margin/VBox"]
-layout_mode = 2
-autowrap_mode = 3
-text = "Plot status"
-
-[node name="ActionsLabel" type="Label" parent="UI/Panel/Margin/VBox"]
-layout_mode = 2
-text = "Labor today: 2 / 2"
-
-[node name="ZoomLabel" type="Label" parent="UI/Panel/Margin/VBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 12
-text = "Hex view"
-
-[node name="LegendLabel" type="Label" parent="UI/Panel/Margin/VBox"]
-layout_mode = 2
-autowrap_mode = 3
-theme_override_font_sizes/font_size = 11
-text = "Map legend"
-
-[node name="ActionsRow" type="HBoxContainer" parent="UI/Panel/Margin/VBox"]
+[node name="ActionsRow" type="HBoxContainer" parent="UI/PlotPanel/Margin/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="PlantWheatBtn" type="Button" parent="UI/Panel/Margin/VBox/ActionsRow"]
+[node name="PlantWheatBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Plant wheat"
 
-[node name="PlantBarleyBtn" type="Button" parent="UI/Panel/Margin/VBox/ActionsRow"]
+[node name="PlantBarleyBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Plant barley"
 
-[node name="TendBtn" type="Button" parent="UI/Panel/Margin/VBox/ActionsRow"]
+[node name="TendBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Tend"
 
-[node name="HarvestBtn" type="Button" parent="UI/Panel/Margin/VBox/ActionsRow"]
+[node name="HarvestBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Harvest"
 
-[node name="ActionsRow2" type="HBoxContainer" parent="UI/Panel/Margin/VBox"]
+[node name="ActionsRow2" type="HBoxContainer" parent="UI/PlotPanel/Margin/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="ClaimBtn" type="Button" parent="UI/Panel/Margin/VBox/ActionsRow2"]
+[node name="ClaimBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow2"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Claim"
 
-[node name="ClearWoodBtn" type="Button" parent="UI/Panel/Margin/VBox/ActionsRow2"]
+[node name="ClearWoodBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow2"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Clear wood"
 
-[node name="DayRow" type="HBoxContainer" parent="UI/Panel/Margin/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="EndDayBtn" type="Button" parent="UI/Panel/Margin/VBox/DayRow"]
+[node name="CancelBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow2"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "End day (Space)"
+text = "Cancel"
 
-[node name="SkipWeekBtn" type="Button" parent="UI/Panel/Margin/VBox/DayRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Skip 7d"
-
-[node name="SkipToWorkBtn" type="Button" parent="UI/Panel/Margin/VBox/DayRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "To work (⇧Space)"
-
-[node name="MenuRow" type="HBoxContainer" parent="UI/Panel/Margin/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="SaveBtn" type="Button" parent="UI/Panel/Margin/VBox/MenuRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Save"
-
-[node name="MenuBtn" type="Button" parent="UI/Panel/Margin/VBox/MenuRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Main menu"
-
-[node name="HintLabel" type="Label" parent="UI/Panel/Margin/VBox"]
+[node name="LegendLabel" type="Label" parent="UI/PlotPanel/Margin/VBox"]
 layout_mode = 2
 autowrap_mode = 3
-text = "Click a plot to select it."
+theme_override_font_sizes/font_size = 10
+text = "Map legend"
 
-[node name="LogLabel" type="Label" parent="UI/Panel/Margin/VBox"]
+[node name="LogScroll" type="ScrollContainer" parent="UI/PlotPanel/Margin/VBox"]
 layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LogLabel" type="Label" parent="UI/PlotPanel/Margin/VBox/LogScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
 autowrap_mode = 3
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 11
 text = "Log"
 
 [node name="GameOverPanel" type="PanelContainer" parent="UI"]

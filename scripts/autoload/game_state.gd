@@ -33,6 +33,22 @@ const HUNGRY_DAYS_TO_LOSE := 7
 const CLAIM_PLOT_FOOD_COST := 2
 const CLEAR_WOOD_FOOD_COST := 3
 
+## Labour model: a hex is ~10 m², so a worker covers several per day.
+## The head of household contributes this many work-units; family add their own.
+const LABOR_HEAD := 10
+const SPOUSE_LABOR := 10
+const CHILD_LABOR := 5
+## Work-unit cost to complete one task on a single ~10 m² hex.
+const TASK_COST := {
+	"tend": 1,
+	"plant": 2,
+	"harvest": 2,
+	"claim": 6,
+	"clear_wood": 12,
+}
+## Order in which queued orders claim the day's labour.
+const ORDER_PRIORITY: Array[String] = ["harvest", "tend", "plant", "claim", "clear_wood"]
+
 var rng := RandomNumberGenerator.new()
 var year: int = 1
 var season: Season = Season.SPRING
@@ -45,6 +61,11 @@ var resources: Dictionary = {
 }
 var plots: Dictionary = {}
 var crops: Dictionary = {}
+## Queued work the player has planned: Vector2i -> {type, crop_id, work}.
+var orders: Dictionary = {}
+## Household labour for the current day.
+var labor_per_day: int = LABOR_HEAD
+var labor_pool: int = LABOR_HEAD
 var log_lines: PackedStringArray = []
 var home_hex: Vector2i = Vector2i.ZERO
 var hex_sim: HexSim
@@ -64,6 +85,7 @@ var _terrain_cells: Dictionary = {}
 var _batch_mode: bool = false
 var _batch_stats: Dictionary = {}
 var _pending_load: Dictionary = {}
+var _worked_today: bool = false
 
 
 func _ready() -> void:
@@ -84,11 +106,13 @@ func start_new_game(seed: int = -1) -> void:
 		"barley_seed": 6,
 	}
 	plots.clear()
+	orders.clear()
 	log_lines.clear()
 	buildings.clear()
 	cleared_woods.clear()
 	_batch_mode = false
 	_batch_stats = {}
+	_worked_today = false
 	home_hex = Vector2i.ZERO
 	game_lost = false
 	consecutive_hungry_days = 0
@@ -146,9 +170,25 @@ func save_game() -> bool:
 		"hungry_days": consecutive_hungry_days,
 		"game_lost": game_lost,
 		"game_over_reason": last_game_over_reason,
-		"actions_remaining": TurnManager.actions_remaining,
+		"labor_pool": labor_pool,
+		"labor_per_day": labor_per_day,
+		"orders": _serialize_orders(),
 		"log": Array(log_lines),
 	})
+
+
+func _serialize_orders() -> Array:
+	var out: Array = []
+	for coords in orders:
+		var order: Dictionary = orders[coords]
+		out.append({
+			"x": coords.x,
+			"y": coords.y,
+			"type": order.get("type", ""),
+			"crop_id": order.get("crop_id", ""),
+			"work": int(order.get("work", 0)),
+		})
+	return out
 
 
 func load_game() -> bool:
@@ -166,8 +206,7 @@ func apply_loaded_state() -> void:
 	var data := _pending_load
 	_pending_load = {}
 	rng.seed = int(data.get("seed", 12345))
-	var saved_actions := int(data.get("actions_remaining", TurnManager.actions_per_turn))
-	TurnManager.reset_for_test(int(data.get("turn", 1)), saved_actions)
+	TurnManager.reset_for_test(int(data.get("turn", 1)))
 	year = int(data.get("year", 1))
 	season = data.get("season", Season.SPRING) as Season
 	weather = data.get("weather", Weather.CLEAR) as Weather
@@ -189,6 +228,16 @@ func apply_loaded_state() -> void:
 		plot.tended = bool(entry.get("tended", false))
 		plots[coords] = plot
 	_setup_household()
+	orders.clear()
+	for entry in data.get("orders", []):
+		var ocoords := Vector2i(int(entry["x"]), int(entry["y"]))
+		orders[ocoords] = {
+			"type": str(entry.get("type", "")),
+			"crop_id": str(entry.get("crop_id", "")),
+			"work": int(entry.get("work", 0)),
+		}
+	labor_per_day = int(data.get("labor_per_day", household_labor()))
+	labor_pool = int(data.get("labor_pool", labor_per_day))
 	_load_buildings_from_save(data.get("buildings", []))
 	cleared_woods.clear()
 	for entry in data.get("cleared_woods", []):
@@ -302,6 +351,7 @@ func _setup_household() -> void:
 	spouse.id = "spouse"
 	spouse.display_name = "Spouse"
 	spouse.hex_coords = home_hex
+	spouse.daily_labor = SPOUSE_LABOR
 	spouse.rules = [{"action": "tend", "probability": 0.6}, {"action": "idle", "probability": 0.4}]
 	persons.append(spouse)
 
@@ -309,6 +359,7 @@ func _setup_household() -> void:
 	child.id = "child"
 	child.display_name = "Child"
 	child.hex_coords = home_hex
+	child.daily_labor = CHILD_LABOR
 	child.rules = [{"action": "tend", "probability": 0.35}, {"action": "idle", "probability": 0.65}]
 	persons.append(child)
 
@@ -321,6 +372,7 @@ func _setup_household() -> void:
 	agents.append(player_agent)
 
 	_setup_neighbor_holding()
+	refresh_labor()
 
 
 func _setup_neighbor_holding() -> void:
@@ -407,11 +459,13 @@ func reset_for_test(seed: int = 12345) -> void:
 		"barley_seed": 6,
 	}
 	plots.clear()
+	orders.clear()
 	log_lines.clear()
 	buildings.clear()
 	cleared_woods.clear()
 	_batch_mode = false
 	_batch_stats = {}
+	_worked_today = false
 	home_hex = Vector2i(0, 0)
 	plots[home_hex] = PlotState.new()
 	game_lost = false
@@ -502,10 +556,12 @@ func can_clear_wood(coords: Vector2i) -> bool:
 
 
 func try_clear_wood(coords: Vector2i) -> String:
+	return _spend_labor("clear_wood", _do_clear_wood(coords))
+
+
+func _do_clear_wood(coords: Vector2i) -> String:
 	if game_lost:
 		return "Game over."
-	if not TurnManager.consume_action():
-		return "No labor left today."
 	if not can_clear_wood(coords):
 		return "Select woodland next to your holding."
 	if resources.get("food", 0) < CLEAR_WOOD_FOOD_COST:
@@ -524,10 +580,12 @@ func try_clear_wood(coords: Vector2i) -> String:
 
 
 func try_claim_plot(coords: Vector2i) -> String:
+	return _spend_labor("claim", _do_claim(coords))
+
+
+func _do_claim(coords: Vector2i) -> String:
 	if game_lost:
 		return "Game over."
-	if not TurnManager.consume_action():
-		return "No labor left today."
 	if not can_claim_plot(coords):
 		return "Must claim land next to your holding."
 	if resources.get("food", 0) < CLAIM_PLOT_FOOD_COST:
@@ -555,6 +613,209 @@ func get_plot(coords: Vector2i) -> PlotState:
 
 func get_crop(crop_id: String) -> CropDefinition:
 	return crops.get(crop_id)
+
+
+# --- Labour pool ---------------------------------------------------------
+
+func household_labor() -> int:
+	var total := LABOR_HEAD
+	for person in persons:
+		total += int(person.daily_labor)
+	return total
+
+
+func refresh_labor() -> void:
+	labor_per_day = household_labor()
+	labor_pool = labor_per_day
+	_worked_today = false
+
+
+func task_cost(type: String) -> int:
+	return int(TASK_COST.get(type, 1))
+
+
+# --- Order queue ---------------------------------------------------------
+
+func order_for(coords: Vector2i) -> Dictionary:
+	return orders.get(coords, {})
+
+
+func has_order(coords: Vector2i) -> bool:
+	return orders.has(coords)
+
+
+func order_count() -> int:
+	return orders.size()
+
+
+func can_order(coords: Vector2i, type: String, _crop_id: String = "") -> bool:
+	match type:
+		"tend", "harvest", "plant":
+			return is_farm_plot(coords)
+		"claim":
+			return can_claim_plot(coords)
+		"clear_wood":
+			return can_clear_wood(coords)
+	return false
+
+
+func assign_order(coords: Vector2i, type: String, crop_id: String = "") -> String:
+	if game_lost:
+		return "Game over."
+	if not can_order(coords, type, crop_id):
+		return "Can't plan that here."
+	orders[coords] = {"type": type, "crop_id": crop_id, "work": 0}
+	plot_changed.emit(coords)
+	return "ok"
+
+
+func cancel_order(coords: Vector2i) -> bool:
+	if orders.erase(coords):
+		plot_changed.emit(coords)
+		return true
+	return false
+
+
+func order_label(coords: Vector2i) -> String:
+	var order := order_for(coords)
+	if order.is_empty():
+		return ""
+	match String(order.get("type", "")):
+		"plant":
+			return "plant %s" % String(order.get("crop_id", ""))
+		"clear_wood":
+			return "clear wood"
+		var other:
+			return other
+
+
+## Spend today's labour pool on queued orders, highest priority first.
+func work_today() -> void:
+	if _worked_today:
+		return
+	_worked_today = true
+	_work_orders()
+
+
+func _work_orders() -> void:
+	if game_lost:
+		return
+	for type in ORDER_PRIORITY:
+		for coords in _orders_of_type(type):
+			if labor_pool <= 0:
+				return
+			_advance_order(coords)
+
+
+func _orders_of_type(type: String) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for coords in orders:
+		if String(orders[coords].get("type", "")) == type:
+			out.append(coords)
+	return out
+
+
+func _advance_order(coords: Vector2i) -> void:
+	var order: Dictionary = orders[coords]
+	var block := _order_block_reason(coords, order)
+	if block == "invalid":
+		orders.erase(coords)
+		plot_changed.emit(coords)
+		return
+	if block == "wait":
+		return
+	var type := String(order.get("type", ""))
+	var cost := task_cost(type)
+	var need: int = cost - int(order.get("work", 0))
+	if need <= 0:
+		need = cost
+	var spend: int = mini(labor_pool, need)
+	order["work"] = int(order.get("work", 0)) + spend
+	labor_pool -= spend
+	orders[coords] = order
+	if int(order["work"]) >= cost:
+		_apply_order_effect(coords, order)
+		orders.erase(coords)
+		plot_changed.emit(coords)
+
+
+## "" = ready to work, "wait" = blocked by transient conditions, "invalid" = drop it.
+func _order_block_reason(coords: Vector2i, order: Dictionary) -> String:
+	match String(order.get("type", "")):
+		"tend":
+			var plot := get_plot(coords)
+			if plot == null or plot.is_empty():
+				return "invalid"
+			return ""
+		"harvest":
+			var plot := get_plot(coords)
+			if plot == null or plot.is_empty():
+				return "invalid"
+			var crop := get_crop(plot.crop_id)
+			if crop == null:
+				return "invalid"
+			return "" if plot.is_mature(crop) else "wait"
+		"plant":
+			var plot := get_plot(coords)
+			if plot == null:
+				return "invalid"
+			if not plot.is_empty():
+				return "invalid"
+			var crop := get_crop(String(order.get("crop_id", "")))
+			if crop == null:
+				return "invalid"
+			if season not in crop.plant_seasons:
+				return "wait"
+			if weather == Weather.FROST and not crop.frost_tolerant:
+				return "wait"
+			if resources.get(crop.seed_resource, 0) < 1:
+				return "wait"
+			return ""
+		"claim":
+			if not can_claim_plot(coords):
+				return "invalid"
+			return "wait" if resources.get("food", 0) < CLAIM_PLOT_FOOD_COST else ""
+		"clear_wood":
+			if not can_clear_wood(coords):
+				return "invalid"
+			return "wait" if resources.get("food", 0) < CLEAR_WOOD_FOOD_COST else ""
+	return "invalid"
+
+
+func _apply_order_effect(coords: Vector2i, order: Dictionary) -> void:
+	match String(order.get("type", "")):
+		"tend":
+			_do_tend(coords)
+		"harvest":
+			_do_harvest(coords)
+		"plant":
+			_do_plant(coords, String(order.get("crop_id", "")))
+		"claim":
+			_do_claim(coords)
+		"clear_wood":
+			_do_clear_wood(coords)
+
+
+func has_pending_orders() -> bool:
+	return not orders.is_empty()
+
+
+## True when an unordered plot needs the player's attention (mature or needs tending).
+func needs_attention() -> bool:
+	for coords in plots:
+		if has_order(coords):
+			continue
+		var plot: PlotState = plots[coords]
+		if plot.is_empty():
+			continue
+		var crop := get_crop(plot.crop_id)
+		if crop == null:
+			continue
+		if plot.is_mature(crop):
+			return true
+		if _needs_tend(plot, crop):
+			return true
+	return false
 
 
 func family_summary() -> String:
@@ -627,10 +888,12 @@ func _sync_calendar_from_turn(turn_number: int) -> void:
 
 
 func try_plant(coords: Vector2i, crop_id: String) -> String:
+	return _spend_labor("plant", _do_plant(coords, crop_id))
+
+
+func _do_plant(coords: Vector2i, crop_id: String) -> String:
 	if game_lost:
 		return "Game over."
-	if not TurnManager.consume_action():
-		return "No labor left today."
 	var plot := get_plot(coords)
 	if plot == null:
 		return "Not a farm plot."
@@ -656,10 +919,12 @@ func try_plant(coords: Vector2i, crop_id: String) -> String:
 
 
 func try_tend(coords: Vector2i) -> String:
+	return _spend_labor("tend", _do_tend(coords))
+
+
+func _do_tend(coords: Vector2i) -> String:
 	if game_lost:
 		return "Game over."
-	if not TurnManager.consume_action():
-		return "No labor left today."
 	var plot := get_plot(coords)
 	if plot == null or plot.is_empty():
 		return "Nothing to tend here."
@@ -670,14 +935,18 @@ func try_tend(coords: Vector2i) -> String:
 
 
 func try_harvest(coords: Vector2i) -> String:
+	return _spend_labor("harvest", _do_harvest(coords))
+
+
+func _do_harvest(coords: Vector2i) -> String:
 	if game_lost:
 		return "Game over."
-	if not TurnManager.consume_action():
-		return "No labor left today."
 	var plot := get_plot(coords)
 	if plot == null or plot.is_empty():
 		return "Nothing to harvest."
 	var crop: CropDefinition = get_crop(plot.crop_id)
+	if crop == null:
+		return "Unknown crop on plot."
 	if not plot.is_mature(crop):
 		return "%s is not ready (%d/%d days)." % [
 			crop.display_name, plot.growth_days, crop.grow_days
@@ -688,6 +957,14 @@ func try_harvest(coords: Vector2i) -> String:
 	_mark_plot_changed(coords)
 	_log("Harvested %s (+ %d food)." % [name, crop.yield_food])
 	return "ok"
+
+
+## Charge the labour pool when an immediate action succeeded. `result` is the
+## outcome of the matching `_do_*` call; labour is only spent on "ok".
+func _spend_labor(type: String, result: String) -> String:
+	if result == "ok":
+		labor_pool = maxi(0, labor_pool - task_cost(type))
+	return result
 
 
 func _mark_plot_changed(coords: Vector2i) -> void:
@@ -735,6 +1012,8 @@ func plot_status(coords: Vector2i) -> String:
 	if plot.is_empty():
 		return "Empty plot — plant wheat or barley."
 	var crop: CropDefinition = get_crop(plot.crop_id)
+	if crop == null:
+		return "Unknown crop on plot."
 	if plot.is_mature(crop):
 		return "%s — ready to harvest" % crop.display_name
 	return "%s — growing (%d/%d days)%s" % [
@@ -784,6 +1063,8 @@ func _can_plant_crop(crop_id: String) -> bool:
 
 
 func _needs_tend(plot: PlotState, crop: CropDefinition) -> bool:
+	if crop == null:
+		return false
 	if plot.tended or plot.is_mature(crop):
 		return false
 	if weather == Weather.DROUGHT:
@@ -801,7 +1082,6 @@ func _on_day_ended(ended_day: int) -> void:
 
 func _resolve_day(ended_day: int) -> void:
 	_sync_calendar_from_turn(ended_day)
-	person_system.resolve_day(persons, rng, self)
 	_advance_crops()
 	_consume_household_food_daily()
 	_check_hunger_lose()
@@ -852,6 +1132,8 @@ func _advance_crops() -> void:
 		if plot.is_empty():
 			continue
 		var crop: CropDefinition = get_crop(plot.crop_id)
+		if crop == null:
+			continue
 		if plot.is_mature(crop):
 			continue
 		if weather == Weather.FROST and not crop.frost_tolerant:

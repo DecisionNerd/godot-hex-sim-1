@@ -17,6 +17,7 @@ const COLOR_GRASS := Color(0.35, 0.55, 0.28, 0.35)
 const COLOR_WATER := Color(0.15, 0.35, 0.62, 0.75)
 const COLOR_HOME := Color(0.45, 0.55, 0.85, 0.5)
 const COLOR_NEED_WORK := Color(0.95, 0.42, 0.12, 0.95)
+const COLOR_ORDER := Color(0.25, 0.85, 0.95, 0.95)
 const COLOR_TENDED := Color(0.35, 0.65, 0.95, 0.9)
 const COLOR_SELECT := Color(1.0, 0.95, 0.55, 1.0)
 const COLOR_HOUSE := Color(0.55, 0.38, 0.22, 0.95)
@@ -58,6 +59,8 @@ func _draw() -> void:
 		_draw_farm_plot(coords)
 	for coords in GameState.buildings:
 		_draw_building(coords, GameState.buildings[coords])
+	for coords in GameState.orders:
+		_draw_order_marker(coords)
 	if selected_hex != Vector2i(999999, 999999):
 		_draw_selection(selected_hex)
 
@@ -166,6 +169,11 @@ func _draw_trees(coords: Vector2i) -> void:
 		draw_colored_polygon(top, Color(0.15, 0.42, 0.18, 0.95))
 
 
+func _draw_order_marker(coords: Vector2i) -> void:
+	_draw_hex_border(coords, COLOR_ORDER, 2.5, true)
+	_draw_label(coords, "→ " + GameState.order_label(coords), 10, Vector2(0, -float(HexGrid.TILE_SIZE.y) * 0.22))
+
+
 func _draw_selection(coords: Vector2i) -> void:
 	_draw_hex_border(coords, COLOR_SELECT, 4.0, false)
 
@@ -224,10 +232,4 @@ func _hex_center(coords: Vector2i) -> Vector2:
 
 
 func _hex_points(coords: Vector2i) -> PackedVector2Array:
-	var center := _hex_center(coords)
-	var radius := float(HexGrid.TILE_SIZE.y) * 0.5
-	var points := PackedVector2Array()
-	for i in range(6):
-		var angle := -PI / 2.0 + float(i) * (PI / 3.0)
-		points.append(center + Vector2(cos(angle), sin(angle)) * radius)
-	return points
+	return HexGrid.hex_corners(_hex_center(coords))

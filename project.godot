@@ -29,12 +29,19 @@ gdscript/warnings/untyped_declaration=1
 
 [display]
 
-window/size/viewport_width=1280
-window/size/viewport_height=720
-window/size/window_width_override=1280
-window/size/window_height_override=720
+window/size/viewport_width=1440
+window/size/viewport_height=900
+window/size/mode=0
+window/size/resizable=true
+window/size/window_width_override=1440
+window/size/window_height_override=900
+window/size/initial_position_type=1
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/dpi/allow_hidpi=true
+window/content_scale/mode=2
+window/content_scale/aspect=4
+window/content_scale/size=Vector2i(1440, 900)
 
 [editor_plugins]
 

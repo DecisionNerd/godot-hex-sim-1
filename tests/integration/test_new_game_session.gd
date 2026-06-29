@@ -9,13 +9,14 @@ func test_new_game_is_playable() -> void:
 	GameState.init_plots_from_map(tile_map)
 	TurnManager.begin_game_scene()
 	assert_false(GameState.game_lost, "new game should not be lost")
-	assert_true(TurnManager.has_actions(), "player should have labor actions")
+	assert_gt(GameState.labor_pool, 0, "household should have labour to spend")
 	assert_true(GameState.is_farm_plot(GameState.home_hex), "home hex should be a farm plot")
 	assert_gt(GameState.world_coords().size(), 20, "generated map should have many cells")
 	GameState.weather = GameState.Weather.CLEAR
+	var labor_before: int = GameState.labor_pool
 	var plant := GameState.try_plant(GameState.home_hex, "wheat")
 	assert_eq(plant, "ok", "planting wheat on a clear spring day should succeed")
-	assert_eq(TurnManager.actions_remaining, 1)
+	assert_eq(GameState.labor_pool, labor_before - GameState.task_cost("plant"))
 
 
 func test_stale_game_lost_resets_on_init() -> void:
@@ -27,4 +28,4 @@ func test_stale_game_lost_resets_on_init() -> void:
 	SceneRouter.entering_new_game = false
 	GameState.init_plots_from_map(tile_map)
 	assert_false(GameState.game_lost, "init should recover from stale game over")
-	assert_true(TurnManager.has_actions())
+	assert_gt(GameState.labor_pool, 0)
