@@ -12,6 +12,7 @@ const SaveManager = preload("res://scripts/autoload/save_manager.gd")
 const FarmBuilding = preload("res://scripts/world/farm_building.gd")
 const TerrainClassifier = preload("res://scripts/world/terrain_classifier.gd")
 const MapGenerator = preload("res://scripts/world/map_generator.gd")
+const HexGrid = preload("res://scripts/world/hex_grid.gd")
 
 signal season_changed(season: int, year: int)
 signal weather_changed(weather: int)
@@ -227,23 +228,27 @@ func end_day_batch() -> void:
 
 func init_plots_from_map(tile_map: TileMapLayer) -> void:
 	_map = tile_map
-	_generate_world_map(tile_map)
+	MapGenerator.prepare_tile_map(tile_map)
+	if not _pending_load.is_empty():
+		rng.seed = int(_pending_load.get("seed", rng.seed))
+	if not _pending_load.is_empty() or SceneRouter.entering_new_game or _terrain_cells.is_empty():
+		_generate_world_map()
+	var needs_fresh_plots := plots.is_empty() or SceneRouter.entering_new_game
 	if not _pending_load.is_empty():
 		apply_loaded_state()
 		_rebuild_world_from_map(tile_map)
 		_sync_hex_from_plots()
 		game_started.emit()
 		return
-	# Autoload state survives scene changes — recover if a fresh start was requested
-	# but game_lost was left set (e.g. editor re-run, stale session).
 	if game_lost and not SceneRouter.entering_new_game:
 		start_new_game()
-		_generate_world_map(tile_map)
-	if plots.is_empty():
+		_generate_world_map()
+		needs_fresh_plots = true
+	if needs_fresh_plots:
 		plots.clear()
 		home_hex = MapGenerator.pick_home_hex(_terrain_cells)
 		plots[home_hex] = PlotState.new()
-		var neighbors: Array[Vector2i] = tile_map.get_surrounding_cells(home_hex)
+		var neighbors: Array[Vector2i] = HexGrid.neighbors(home_hex)
 		var added := 1
 		for coords in neighbors:
 			if added >= 8:
@@ -264,9 +269,21 @@ func init_plots_from_map(tile_map: TileMapLayer) -> void:
 		game_started.emit()
 
 
-func _generate_world_map(tile_map: TileMapLayer) -> void:
+func _generate_world_map() -> void:
 	_terrain_cells = MapGenerator.generate_terrain(rng)
-	MapGenerator.apply_to_tile_map(tile_map, _terrain_cells)
+
+
+func world_coords() -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for coords in _terrain_cells:
+		out.append(coords)
+	return out
+
+
+func map_to_world(coords: Vector2i) -> Vector2:
+	if _map != null and _map.tile_set != null:
+		return _map.map_to_local(coords)
+	return HexGrid.map_to_local(coords)
 
 
 func _setup_household() -> void:
@@ -362,7 +379,9 @@ func _sync_hex_from_plots() -> void:
 				hex.food = crop.yield_food if plot.is_mature(crop) else 0
 		hex.population = 1 if coords == home_hex else 0
 		hex_sim.mark_dirty(coords)
-	hex_sim.get_hex(home_hex).population = 1 + persons.size()
+	var home: HexState = hex_sim.get_hex(home_hex)
+	if home != null:
+		home.population = 1 + persons.size()
 	hex_sim.flush_aggregates()
 
 
@@ -440,6 +459,8 @@ func get_building(coords: Vector2i) -> FarmBuilding:
 
 
 func hex_terrain(coords: Vector2i) -> int:
+	if _terrain_cells.has(coords):
+		return _terrain_cells[coords]
 	if hex_sim == null:
 		return HexState.TERRAIN_GRASS
 	var hex: HexState = hex_sim.get_hex(coords)
@@ -452,7 +473,7 @@ func is_adjacent_to_holding(coords: Vector2i) -> bool:
 	if _map == null:
 		return false
 	for owned in plots:
-		if coords in _map.get_surrounding_cells(owned):
+		if coords in HexGrid.neighbors(owned):
 			return true
 	return false
 
@@ -728,9 +749,9 @@ func has_actionable_work() -> bool:
 	for coords in plots:
 		if _plot_has_work(plots[coords]):
 			return true
-	if _map != null:
-		for coords in _map.get_used_cells():
-			if can_clear_wood(coords) or can_claim_plot(coords):
+	for owned in plots:
+		for neighbor in HexGrid.neighbors(owned):
+			if can_clear_wood(neighbor) or can_claim_plot(neighbor):
 				return true
 	return false
 

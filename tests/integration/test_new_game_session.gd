@@ -11,7 +11,7 @@ func test_new_game_is_playable() -> void:
 	assert_false(GameState.game_lost, "new game should not be lost")
 	assert_true(TurnManager.has_actions(), "player should have labor actions")
 	assert_true(GameState.is_farm_plot(GameState.home_hex), "home hex should be a farm plot")
-	assert_gt(tile_map.get_used_cells().size(), 20, "generated map should have many land cells")
+	assert_gt(GameState.world_coords().size(), 20, "generated map should have many cells")
 	GameState.weather = GameState.Weather.CLEAR
 	var plant := GameState.try_plant(GameState.home_hex, "wheat")
 	assert_eq(plant, "ok", "planting wheat on a clear spring day should succeed")

@@ -1,7 +1,9 @@
 extends Node2D
 
 const HexState = preload("res://scripts/world/hex_state.gd")
+const HexGrid = preload("res://scripts/world/hex_grid.gd")
 const FarmBuilding = preload("res://scripts/world/farm_building.gd")
+const PlotState = preload("res://scripts/farming/plot_state.gd")
 
 const COLOR_EMPTY := Color(0.58, 0.45, 0.28, 0.62)
 const COLOR_WHEAT := Color(0.72, 0.78, 0.32, 0.78)
@@ -21,14 +23,12 @@ const COLOR_HOUSE := Color(0.55, 0.38, 0.22, 0.95)
 const COLOR_BARN := Color(0.62, 0.28, 0.18, 0.92)
 const COLOR_ROOF := Color(0.45, 0.22, 0.12, 0.95)
 
-var tile_map: TileMapLayer
 var selected_hex: Vector2i = Vector2i(999999, 999999)
 var _hex_view: bool = true
 var _font: Font
 
 
-func setup(map: TileMapLayer) -> void:
-	tile_map = map
+func setup(_map: TileMapLayer) -> void:
 	_font = ThemeDB.fallback_font
 
 
@@ -48,9 +48,9 @@ func refresh() -> void:
 
 
 func _draw() -> void:
-	if tile_map == null or not _hex_view:
+	if not _hex_view:
 		return
-	for coords in tile_map.get_used_cells():
+	for coords in GameState.world_coords():
 		if GameState.is_farm_plot(coords):
 			continue
 		_draw_wild_hex(coords)
@@ -64,10 +64,10 @@ func _draw() -> void:
 
 func _draw_wild_hex(coords: Vector2i) -> void:
 	var terrain := GameState.hex_terrain(coords)
-	var work := GameState.plot_work_type(coords)
 	if terrain == HexState.TERRAIN_WATER:
 		_draw_hex_fill(coords, COLOR_WATER)
 		return
+	var work := GameState.plot_work_type(coords)
 	if terrain == HexState.TERRAIN_WOOD:
 		_draw_hex_fill(coords, COLOR_WOOD)
 		_draw_trees(coords)
@@ -83,7 +83,7 @@ func _draw_wild_hex(coords: Vector2i) -> void:
 
 
 func _draw_farm_plot(coords: Vector2i) -> void:
-	var plot = GameState.get_plot(coords)
+	var plot: PlotState = GameState.get_plot(coords)
 	if plot == null:
 		return
 	var work := GameState.plot_work_type(coords)
@@ -118,7 +118,7 @@ func _draw_farm_plot(coords: Vector2i) -> void:
 
 
 func _draw_building(coords: Vector2i, building: FarmBuilding) -> void:
-	var center := tile_map.map_to_local(coords)
+	var center := _hex_center(coords)
 	match building.kind:
 		FarmBuilding.Kind.HOUSE:
 			_draw_house(center)
@@ -154,7 +154,7 @@ func _draw_barn(center: Vector2) -> void:
 
 
 func _draw_trees(coords: Vector2i) -> void:
-	var center := tile_map.map_to_local(coords)
+	var center := _hex_center(coords)
 	for offset in [Vector2(-14, -8), Vector2(10, 6), Vector2(-4, 14)]:
 		var p: Vector2 = center + offset
 		draw_circle(p + Vector2(0, 4), 7.0, Color(0.08, 0.22, 0.08, 0.9))
@@ -188,17 +188,17 @@ func _draw_hex_border(coords: Vector2i, color: Color, width: float, dashed: bool
 func _draw_growth_bar(coords: Vector2i, ratio: float, empty: bool) -> void:
 	if empty:
 		return
-	var center := tile_map.map_to_local(coords)
-	var w := float(tile_map.tile_set.tile_size.x) * 0.55
+	var center := _hex_center(coords)
+	var w := float(HexGrid.TILE_SIZE.x) * 0.55
 	var h := 6.0
 	var left := center.x - w * 0.5
-	var top := center.y + float(tile_map.tile_set.tile_size.y) * 0.18
+	var top := center.y + float(HexGrid.TILE_SIZE.y) * 0.18
 	draw_rect(Rect2(left, top, w, h), Color(0.1, 0.1, 0.1, 0.55))
 	draw_rect(Rect2(left, top, w * ratio, h), Color(0.25, 0.85, 0.35, 0.9))
 
 
 func _draw_tended_marker(coords: Vector2i) -> void:
-	var center := tile_map.map_to_local(coords)
+	var center := _hex_center(coords)
 	draw_circle(center + Vector2(-22, -18), 5.0, COLOR_TENDED)
 	draw_circle(center + Vector2(-22, -18), 5.0, Color(0.1, 0.2, 0.35, 0.8), false, 1.0)
 
@@ -206,7 +206,7 @@ func _draw_tended_marker(coords: Vector2i) -> void:
 func _draw_label(coords: Vector2i, text: String, size: int, offset: Vector2 = Vector2.ZERO) -> void:
 	if _font == null or text.is_empty():
 		return
-	var center := tile_map.map_to_local(coords) + offset
+	var center := _hex_center(coords) + offset
 	var text_size := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, size)
 	draw_string(
 		_font,
@@ -219,14 +219,15 @@ func _draw_label(coords: Vector2i, text: String, size: int, offset: Vector2 = Ve
 	)
 
 
+func _hex_center(coords: Vector2i) -> Vector2:
+	return GameState.map_to_world(coords)
+
+
 func _hex_points(coords: Vector2i) -> PackedVector2Array:
-	var center := tile_map.map_to_local(coords)
-	var size := float(tile_map.tile_set.tile_size.x) * 0.44
-	return PackedVector2Array([
-		Vector2(center.x, center.y - size),
-		Vector2(center.x + size * 0.866, center.y - size * 0.5),
-		Vector2(center.x + size * 0.866, center.y + size * 0.5),
-		Vector2(center.x, center.y + size),
-		Vector2(center.x - size * 0.866, center.y + size * 0.5),
-		Vector2(center.x - size * 0.866, center.y - size * 0.5),
-	])
+	var center := _hex_center(coords)
+	var radius := float(HexGrid.TILE_SIZE.y) * 0.5
+	var points := PackedVector2Array()
+	for i in range(6):
+		var angle := -PI / 2.0 + float(i) * (PI / 3.0)
+		points.append(center + Vector2(cos(angle), sin(angle)) * radius)
+	return points

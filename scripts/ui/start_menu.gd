@@ -5,10 +5,15 @@ extends Control
 
 func _ready() -> void:
 	_refresh_continue()
-	$Center/VBox/NewGameBtn.pressed.connect(_on_new_game)
-	continue_btn.pressed.connect(_on_continue)
-	$Center/VBox/OptionsBtn.pressed.connect(_on_options)
-	$Center/VBox/QuitBtn.pressed.connect(_on_quit)
+	_connect_btn($Center/VBox/NewGameBtn, _on_new_game)
+	_connect_btn(continue_btn, _on_continue)
+	_connect_btn($Center/VBox/OptionsBtn, _on_options)
+	_connect_btn($Center/VBox/QuitBtn, _on_quit)
+
+
+func _connect_btn(button: BaseButton, callable: Callable) -> void:
+	if not button.pressed.is_connected(callable):
+		button.pressed.connect(callable)
 
 
 func _on_new_game() -> void:

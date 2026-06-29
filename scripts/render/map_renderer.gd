@@ -7,6 +7,7 @@ const ZOOM_BLOCK := 0.2
 const ZOOM_ZONE := 0.07
 
 const HexGrid = preload("res://scripts/world/hex_grid.gd")
+const AggregateBucket = preload("res://scripts/world/aggregate_bucket.gd")
 
 const TERRAIN_COLORS := {
 	0: Color(0.22, 0.45, 0.22, 0.85),
@@ -61,7 +62,7 @@ func _draw() -> void:
 		_:
 			return
 	for key in store:
-		var bucket = store[key]
+		var bucket: AggregateBucket = store[key]
 		if bucket.plot_count <= 0 and bucket.population <= 0:
 			continue
 		var origin := Vector2(bucket.id.x * cell_size, bucket.id.y * cell_size)

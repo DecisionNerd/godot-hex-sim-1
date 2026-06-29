@@ -1,5 +1,7 @@
 extends Node2D
 
+const HexGrid = preload("res://scripts/world/hex_grid.gd")
+
 @onready var tile_map: TileMapLayer = $TileMapLayer
 @onready var camera: Camera2D = $Camera2D
 @onready var map_renderer: Node2D = $MapRenderer
@@ -43,7 +45,7 @@ func _ready() -> void:
 	plot_overlay.setup(tile_map)
 	plot_overlay.set_selected(selected_hex)
 	map_renderer.setup(tile_map, camera)
-	camera.position = tile_map.map_to_local(selected_hex)
+	camera.position = GameState.map_to_world(selected_hex)
 	_set_hex_view(camera.zoom.x)
 	_refresh_game_over_ui()
 	_update_ui()
@@ -71,18 +73,23 @@ func _connect_signals() -> void:
 
 
 func _connect_buttons() -> void:
-	plant_wheat_btn.pressed.connect(_on_plant_wheat)
-	plant_barley_btn.pressed.connect(_on_plant_barley)
-	tend_btn.pressed.connect(_on_tend)
-	harvest_btn.pressed.connect(_on_harvest)
-	claim_btn.pressed.connect(_on_claim)
-	clear_wood_btn.pressed.connect(_on_clear_wood)
-	end_day_btn.pressed.connect(_on_end_day)
-	skip_week_btn.pressed.connect(_on_skip_week)
-	skip_to_work_btn.pressed.connect(_on_advance_until_work)
-	save_btn.pressed.connect(_on_save)
-	menu_btn.pressed.connect(_on_menu)
-	$UI/GameOverPanel/Margin/VBox/MenuBtn.pressed.connect(_on_menu)
+	_connect_btn(plant_wheat_btn, _on_plant_wheat)
+	_connect_btn(plant_barley_btn, _on_plant_barley)
+	_connect_btn(tend_btn, _on_tend)
+	_connect_btn(harvest_btn, _on_harvest)
+	_connect_btn(claim_btn, _on_claim)
+	_connect_btn(clear_wood_btn, _on_clear_wood)
+	_connect_btn(end_day_btn, _on_end_day)
+	_connect_btn(skip_week_btn, _on_skip_week)
+	_connect_btn(skip_to_work_btn, _on_advance_until_work)
+	_connect_btn(save_btn, _on_save)
+	_connect_btn(menu_btn, _on_menu)
+	_connect_btn($UI/GameOverPanel/Margin/VBox/MenuBtn, _on_menu)
+
+
+func _connect_btn(button: BaseButton, callable: Callable) -> void:
+	if not button.pressed.is_connected(callable):
+		button.pressed.connect(callable)
 
 
 func _on_season_changed(_season: int, _year: int) -> void:
@@ -162,7 +169,8 @@ func _set_hex_view(zoom: float) -> void:
 
 
 func _try_select_at_mouse() -> void:
-	var target := tile_map.local_to_map(tile_map.get_local_mouse_position())
+	var local_pos := to_local(get_global_mouse_position())
+	var target := HexGrid.local_to_map(local_pos)
 	if GameState.is_farm_plot(target) or GameState.can_claim_plot(target) or GameState.can_clear_wood(target):
 		selected_hex = target
 		plot_overlay.set_selected(target)
@@ -274,10 +282,7 @@ func _update_ui() -> void:
 		TurnManager.actions_per_turn,
 	]
 	zoom_label.text = GameState.render_level_name(camera.zoom.x)
-	legend_label.text = (
-		"Green=grass · blue=water · dark green WOOD · brown=field · "
-		"orange=work · HOUSE/BARN=buildings · CLAIM/CLEAR to expand"
-	)
+	legend_label.text = "Green=grass · blue=water · dark green WOOD · brown=field · orange=work · HOUSE/BARN=buildings · CLAIM/CLEAR to expand"
 	hint_label.text = _default_hint()
 	plot_overlay.refresh()
 	_update_log()

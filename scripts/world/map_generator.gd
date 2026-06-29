@@ -4,7 +4,7 @@ extends RefCounted
 const HexGrid = preload("res://scripts/world/hex_grid.gd")
 const HexState = preload("res://scripts/world/hex_state.gd")
 
-const MAP_RADIUS := 11
+const MAP_RADIUS := 9
 const ORIGIN := Vector2i.ZERO
 
 const WATER_ELEVATION := -0.22
@@ -17,13 +17,13 @@ static func generate_terrain(rng: RandomNumberGenerator) -> Dictionary:
 	elevation.seed = rng.seed
 	elevation.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	elevation.frequency = 0.085
-	elevation.fractal_octaves = 4
+	elevation.fractal_octaves = 3
 
 	var moisture := FastNoiseLite.new()
 	moisture.seed = rng.seed + 7919
 	moisture.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	moisture.frequency = 0.11
-	moisture.fractal_octaves = 3
+	moisture.fractal_octaves = 2
 
 	var terrain: Dictionary = {}
 	for coords in HexGrid.cells_in_radius(ORIGIN, MAP_RADIUS):
@@ -41,14 +41,10 @@ static func generate_terrain(rng: RandomNumberGenerator) -> Dictionary:
 	return terrain
 
 
-static func apply_to_tile_map(tile_map: TileMapLayer, terrain: Dictionary) -> void:
+static func prepare_tile_map(tile_map: TileMapLayer) -> void:
 	if tile_map.tile_set == null:
 		tile_map.tile_set = HexGrid.create_tileset()
 	tile_map.clear()
-	for coords in terrain:
-		if terrain[coords] == HexState.TERRAIN_WATER:
-			continue
-		tile_map.set_cell(coords, 0, Vector2i.ZERO)
 
 
 static func pick_home_hex(terrain: Dictionary) -> Vector2i:

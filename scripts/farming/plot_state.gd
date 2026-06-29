@@ -17,4 +17,6 @@ func is_empty() -> bool:
 
 
 func is_mature(crop: CropDefinition) -> bool:
-	return not is_empty() and growth_days >= crop.grow_days
+	if is_empty() or crop == null:
+		return false
+	return growth_days >= crop.grow_days
