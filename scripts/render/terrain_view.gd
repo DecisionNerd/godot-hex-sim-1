@@ -6,12 +6,14 @@ const HexGrid = preload("res://scripts/world/hex_grid.gd")
 const WestTheme = preload("res://scripts/theme/west_theme.gd")
 
 var selected_hex: Vector2i = Vector2i(999999, 999999)
+var selected_hexes: Array[Vector2i] = []
 
 var _camera_2d: Camera2D
 var _camera_3d: Camera3D
 var _terrain_mesh: MeshInstance3D
 var _features_root: Node3D
-var _selection_mesh: MeshInstance3D
+var _selection_root: Node3D
+var _selection_material: StandardMaterial3D
 var _active := false
 var _map_rotation_deg := 0.0
 
@@ -36,7 +38,15 @@ func set_active(active: bool) -> void:
 
 
 func set_selected(coords: Vector2i) -> void:
-	selected_hex = coords
+	set_selected_hexes([coords])
+
+
+func set_selected_hexes(hexes: Array[Vector2i]) -> void:
+	selected_hexes = hexes
+	if hexes.size() > 0:
+		selected_hex = hexes[0]
+	else:
+		selected_hex = Vector2i(999999, 999999)
 	_update_selection()
 
 
@@ -153,16 +163,15 @@ func _build_scene_graph() -> void:
 	_features_root.name = "Features"
 	add_child(_features_root)
 
-	_selection_mesh = MeshInstance3D.new()
-	_selection_mesh.name = "Selection"
-	var selection_mat := StandardMaterial3D.new()
-	selection_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	selection_mat.albedo_color = WestTheme.COLOR_SELECT
-	selection_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	selection_mat.albedo_color.a = 0.85
-	selection_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_selection_mesh.material_override = selection_mat
-	add_child(_selection_mesh)
+	_selection_root = Node3D.new()
+	_selection_root.name = "Selection"
+	_selection_material = StandardMaterial3D.new()
+	_selection_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_selection_material.albedo_color = WestTheme.COLOR_SELECT
+	_selection_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_selection_material.albedo_color.a = 0.85
+	_selection_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	add_child(_selection_root)
 
 
 func _visible_coords() -> Array[Vector2i]:
@@ -275,15 +284,18 @@ func _add_marker_ring(center: Vector3, color: Color, ring_scale: float) -> void:
 
 
 func _update_selection() -> void:
-	if selected_hex == Vector2i(999999, 999999) or not GameState.hex_sim.hexes.has(selected_hex):
-		_selection_mesh.mesh = null
-		return
-	var hex: HexState = GameState.get_hex(selected_hex)
-	if hex == null:
-		_selection_mesh.mesh = null
-		return
-	_selection_mesh.mesh = _build_selection_mesh(selected_hex, hex)
-	_selection_mesh.position = Vector3.ZERO
+	for child in _selection_root.get_children():
+		child.queue_free()
+	for coords in selected_hexes:
+		if not GameState.hex_sim.hexes.has(coords):
+			continue
+		var hex: HexState = GameState.get_hex(coords)
+		if hex == null:
+			continue
+		var mesh_inst := MeshInstance3D.new()
+		mesh_inst.mesh = _build_selection_mesh(coords, hex)
+		mesh_inst.material_override = _selection_material
+		_selection_root.add_child(mesh_inst)
 
 
 func _build_selection_mesh(coords: Vector2i, hex: HexState) -> ArrayMesh:

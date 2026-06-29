@@ -39,13 +39,15 @@ enum ViewMode { MAP, TERRAIN }
 @onready var game_over_panel: PanelContainer = $UI/GameOverPanel
 
 var selected_hex: Vector2i = Vector2i.ZERO
+var selected_hexes: Array[Vector2i] = []
 var view_mode: ViewMode = ViewMode.MAP
 var _ui_update_queued := false
 var _overlay_refresh_queued := false
-var _pointer_dragging := false
-var _pointer_panned := false
+var _select_dragging := false
+var _pan_dragging := false
 var _pointer_press_screen := Vector2.ZERO
 var _drag_last_screen := Vector2.ZERO
+var _marquee: Control
 const MIN_ZOOM := 0.05
 const MAX_ZOOM := 1.6
 const TERRAIN_MIN_ZOOM := 0.35
@@ -68,17 +70,25 @@ func _ready() -> void:
 	TurnManager.begin_game_scene()
 	SceneRouter.entering_new_game = false
 	selected_hex = GameState.home_hex
+	selected_hexes = [selected_hex]
 	plot_overlay.setup(tile_map, camera)
-	plot_overlay.set_selected(selected_hex)
+	plot_overlay.set_selected_hexes(selected_hexes)
 	terrain_view.setup(camera)
 	terrain_view.set_map_rotation(map_rotation_deg)
-	terrain_view.set_selected(selected_hex)
+	terrain_view.set_selected_hexes(selected_hexes)
 	map_renderer.setup(tile_map, camera)
 	camera.position = GameState.map_to_world(selected_hex)
 	_set_zoom(_default_camera_zoom())
 	_apply_view_mode()
 	_refresh_game_over_ui()
+	_setup_selection_marquee()
 	_request_ui_update(true)
+
+
+func _setup_selection_marquee() -> void:
+	_marquee = preload("res://scripts/ui/selection_marquee.gd").new()
+	$UI.add_child(_marquee)
+	_marquee.z_index = 50
 
 
 func _process(delta: float) -> void:
@@ -86,14 +96,14 @@ func _process(delta: float) -> void:
 		return
 	var pan := Input.get_vector(&"move_left", &"move_right", &"move_up", &"move_down")
 	if pan != Vector2.ZERO:
-		_pan_camera(pan.rotated(camera.rotation) * PAN_SPEED * delta)
-	if _pointer_dragging:
+		_pan_camera_world(pan * PAN_SPEED * delta)
+	if _pan_dragging:
 		var screen_pos := get_viewport().get_mouse_position()
-		if not _pointer_panned and screen_pos.distance_to(_pointer_press_screen) >= DRAG_THRESHOLD:
-			_pointer_panned = true
-		if _pointer_panned:
-			_pan_camera(screen_pos - _drag_last_screen)
+		_pan_camera_screen(screen_pos - _drag_last_screen)
 		_drag_last_screen = screen_pos
+	if _select_dragging:
+		var screen_pos := get_viewport().get_mouse_position()
+		_marquee.set_marquee(_pointer_press_screen, screen_pos)
 
 
 func _exit_tree() -> void:
@@ -247,16 +257,16 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
 		if not mouse_event.pressed:
-			if mouse_event.button_index == MOUSE_BUTTON_LEFT and _pointer_dragging and not _pointer_panned:
-				_try_select_at_mouse()
-			_pointer_dragging = false
-			_pointer_panned = false
+			if mouse_event.button_index == MOUSE_BUTTON_LEFT and _select_dragging:
+				_finish_select_drag()
+			if mouse_event.button_index in [MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT]:
+				_pan_dragging = false
 	if _is_pointer_over_ui():
 		return
 	if event is InputEventMouseButton:
 		_handle_mouse_button(event as InputEventMouseButton)
 	elif event is InputEventPanGesture:
-		_pan_camera(-(event as InputEventPanGesture).delta)
+		_pan_camera_screen(-(event as InputEventPanGesture).delta)
 		get_viewport().set_input_as_handled()
 
 
@@ -270,13 +280,26 @@ func _apply_wheel_zoom(mouse_event: InputEventMouseButton) -> void:
 
 func _handle_mouse_button(mouse_event: InputEventMouseButton) -> void:
 	match mouse_event.button_index:
-		MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT:
+		MOUSE_BUTTON_LEFT:
 			if mouse_event.pressed:
-				_pointer_dragging = true
-				_pointer_panned = false
+				_select_dragging = true
 				_pointer_press_screen = get_viewport().get_mouse_position()
-				_drag_last_screen = _pointer_press_screen
 			get_viewport().set_input_as_handled()
+		MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT:
+			if mouse_event.pressed:
+				_pan_dragging = true
+				_drag_last_screen = get_viewport().get_mouse_position()
+			get_viewport().set_input_as_handled()
+
+
+func _finish_select_drag() -> void:
+	_select_dragging = false
+	_marquee.clear_marquee()
+	var release_pos := get_viewport().get_mouse_position()
+	if release_pos.distance_to(_pointer_press_screen) < DRAG_THRESHOLD:
+		_try_select_at_mouse()
+		return
+	_select_hexes_in_screen_rect(Rect2(_pointer_press_screen, release_pos - _pointer_press_screen))
 
 
 func _is_pointer_over_ui() -> bool:
@@ -307,10 +330,17 @@ func _default_camera_zoom() -> float:
 	return 1.0
 
 
-func _pan_camera(screen_offset: Vector2) -> void:
+func _pan_camera_screen(screen_offset: Vector2) -> void:
 	if screen_offset == Vector2.ZERO:
 		return
 	camera.position += screen_offset.rotated(camera.rotation) / camera.zoom.x
+	_refresh_world_view()
+
+
+func _pan_camera_world(world_offset: Vector2) -> void:
+	if world_offset == Vector2.ZERO:
+		return
+	camera.position += world_offset / camera.zoom.x
 	_refresh_world_view()
 
 
@@ -383,24 +413,67 @@ func _mouse_map_coords() -> Vector2i:
 	return HexGrid.local_to_map(world_pos)
 
 
+func _set_selection(hexes: Array[Vector2i]) -> void:
+	selected_hexes = hexes
+	selected_hex = hexes[0] if hexes.size() > 0 else Vector2i.ZERO
+	plot_overlay.set_selected_hexes(selected_hexes)
+	terrain_view.set_selected_hexes(selected_hexes)
+	_request_ui_update()
+
+
+func _hex_world_position(coords: Vector2i) -> Vector2:
+	if view_mode == ViewMode.TERRAIN:
+		return TerrainLayout.planar_position(coords)
+	return GameState.map_to_world(coords)
+
+
+func _screen_rect_to_world(screen_rect: Rect2) -> Rect2:
+	var inv := get_viewport().get_canvas_transform().affine_inverse()
+	var a: Vector2 = inv * screen_rect.position
+	var b: Vector2 = inv * screen_rect.end
+	return Rect2(Vector2(minf(a.x, b.x), minf(a.y, b.y)), Vector2(absf(b.x - a.x), absf(b.y - a.y)))
+
+
+func _select_hexes_in_screen_rect(screen_rect: Rect2) -> void:
+	if GameState.hex_sim == null:
+		return
+	var world_rect := _screen_rect_to_world(screen_rect)
+	var found: Array[Vector2i] = []
+	for coords in GameState.hex_sim.hexes:
+		if world_rect.has_point(_hex_world_position(coords)):
+			found.append(coords)
+	if found.is_empty():
+		hint_label.text = "No hexes in that area."
+		return
+	_set_selection(found)
+
+
 func _try_select_at_mouse() -> void:
 	var target := _mouse_map_coords()
 	if target == Vector2i(999999, 999999) or not GameState.hex_sim.hexes.has(target):
 		hint_label.text = "Click a hex in the valley."
 		return
-	selected_hex = target
-	plot_overlay.set_selected(target)
-	terrain_view.set_selected(target)
-	_request_ui_update()
+	_set_selection([target])
 
 
 func _assign(type: String, crop_id: String = "") -> void:
-	var result: String = GameState.assign_order(selected_hex, type, crop_id)
-	if result != "ok":
-		hint_label.text = result
+	if selected_hexes.is_empty():
+		hint_label.text = "Select hexes first (click or drag a box)."
+		return
+	var ok_count := 0
+	var last_error := ""
+	for coords in selected_hexes:
+		var result: String = GameState.assign_order(coords, type, crop_id)
+		if result == "ok":
+			ok_count += 1
+		else:
+			last_error = result
+	if ok_count == 0:
+		hint_label.text = last_error if not last_error.is_empty() else "Could not assign chore."
+	elif ok_count == 1:
+		hint_label.text = "Marked 1 hex. Press Work day to send labor."
 	else:
-		var label := GameState.order_label(selected_hex)
-		hint_label.text = "Marked this hex: %s. Press Work day to send labor." % label
+		hint_label.text = "Marked %d hexes. Press Work day to send labor." % ok_count
 	_request_ui_update(true)
 
 
@@ -425,17 +498,33 @@ func _on_claim() -> void:
 
 
 func _on_clear_wood() -> void:
-	if GameState.can_clear_wood(selected_hex):
-		var result := GameState.try_chop_firewood(selected_hex)
-		hint_label.text = "Chopped firewood." if result == "ok" else result
-	else:
-		_assign("field")
+	var chopped := 0
+	for coords in selected_hexes:
+		if GameState.can_clear_wood(coords):
+			if GameState.try_chop_firewood(coords) == "ok":
+				chopped += 1
+	if chopped > 0:
+		hint_label.text = "Chopped firewood on %d hex." % chopped if chopped == 1 else "Chopped firewood on %d hexes." % chopped
+		_request_ui_update(true)
+		return
+	_assign("field")
 
 
 func _on_cancel_order() -> void:
-	if GameState.cancel_order(selected_hex):
-		hint_label.text = "Removed hex from work zone."
+	var removed := 0
+	for coords in selected_hexes:
+		if GameState.cancel_order(coords):
+			removed += 1
+	if removed > 0:
+		hint_label.text = "Removed chore from %d hex." % removed if removed == 1 else "Removed chores from %d hexes." % removed
 	_request_ui_update(true)
+
+
+func _selection_has_order() -> bool:
+	for coords in selected_hexes:
+		if GameState.has_order(coords):
+			return true
+	return false
 
 
 func _on_work_day() -> void:
@@ -502,14 +591,14 @@ func _default_hint() -> String:
 			return "Out of labor today — end the day. Q/E rotate · R/F zoom."
 		if GameState.has_order(selected_hex):
 			return "Chore marked on selected hex. Q/E rotate · R/F zoom · drag pan."
-		return "Click a hex, assign a chore below. Q/E rotate · R/F zoom · drag pan · V map."
+		return "Click hexes or drag a box to select. Q/E rotate · R/F zoom · right-drag pan · V map."
 	if GameState.has_pending_orders():
 		if GameState.labor_pool > 0:
 			return "Work day spends labor on chores; end the day to advance the calendar."
 		return "Out of labor today — end the day."
 	if GameState.needs_attention():
 		return "Gather or harvest is ready. Select the hex, then assign a chore."
-	return "Select hex · assign chores · Work day. WASD/drag pan · Q/E rotate · R/F zoom · V terrain."
+	return "Drag box or click to select · assign chores · Work day. WASD pan (map north) · right-drag · Q/E · R/F · V."
 
 
 func _update_log() -> void:
@@ -542,7 +631,10 @@ func _update_ui(refresh_overlay: bool = false) -> void:
 	season_label.text = GameState.calendar_label(TurnManager.turn_number)
 	resources_label.text = GameState.resources_summary() + " · " + GameState.weather_name()
 	family_label.text = GameState.family_summary() + " · " + GameState.holdings_summary()
-	plot_title_label.text = "Claim hex (%d, %d)" % [selected_hex.x, selected_hex.y]
+	if selected_hexes.size() > 1:
+		plot_title_label.text = "%d hexes selected" % selected_hexes.size()
+	else:
+		plot_title_label.text = "Claim hex (%d, %d)" % [selected_hex.x, selected_hex.y]
 	plot_label.text = _plot_label_text()
 	actions_label.text = "Labor today %d / %d · Chores: %d" % [
 		GameState.labor_pool,
@@ -574,7 +666,7 @@ func _update_ui(refresh_overlay: bool = false) -> void:
 	harvest_btn.disabled = not live
 	claim_btn.disabled = not live
 	clear_wood_btn.disabled = not live
-	cancel_btn.disabled = not live or not GameState.has_order(selected_hex)
+	cancel_btn.disabled = not live or not _selection_has_order()
 	work_day_btn.disabled = not live or not GameState.has_pending_orders() or GameState.labor_pool <= 0
 	end_day_btn.disabled = GameState.game_lost
 	skip_week_btn.disabled = GameState.game_lost
@@ -590,6 +682,8 @@ func _zoom_label_text() -> String:
 
 func _plot_label_text() -> String:
 	var text: String = GameState.hex_status(selected_hex)
+	if selected_hexes.size() > 1:
+		text += "\n(%d hexes in selection — details for active hex)" % selected_hexes.size()
 	if GameState.has_order(selected_hex):
 		text += "\nChore: %s" % GameState.order_label(selected_hex)
 	var hex = GameState.get_hex(selected_hex)

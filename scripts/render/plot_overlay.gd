@@ -4,6 +4,7 @@ const HexGrid = preload("res://scripts/world/hex_grid.gd")
 const WestTheme = preload("res://scripts/theme/west_theme.gd")
 
 var selected_hex: Vector2i = Vector2i(999999, 999999)
+var selected_hexes: Array[Vector2i] = []
 var _hex_view: bool = true
 var _font: Font
 var _camera: Camera2D
@@ -21,7 +22,15 @@ func set_hex_view(enabled: bool) -> void:
 
 
 func set_selected(coords: Vector2i) -> void:
-	selected_hex = coords
+	set_selected_hexes([coords])
+
+
+func set_selected_hexes(hexes: Array[Vector2i]) -> void:
+	selected_hexes = hexes
+	if hexes.size() > 0:
+		selected_hex = hexes[0]
+	else:
+		selected_hex = Vector2i(999999, 999999)
 	queue_redraw()
 
 
@@ -45,8 +54,8 @@ func _draw() -> void:
 		_draw_hex(coords)
 	for coords in GameState.structures:
 		_draw_structure(coords, GameState.structures[coords])
-	if selected_hex != Vector2i(999999, 999999):
-		_draw_selection(selected_hex)
+	for coords in selected_hexes:
+		_draw_selection(coords)
 
 
 func _draw_hex(coords: Vector2i) -> void:
