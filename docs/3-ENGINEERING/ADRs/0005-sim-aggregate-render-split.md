@@ -68,4 +68,4 @@ No second authored map. Read hex buffer or aggregate cache only.
 ## References
 
 - `docs/3-ARCHITECTURE.md`
-- `docs/2-REQUIREMENTS.md` — FR-S5, FR-S6, FR-R*
+- `docs/2-REQUIREMENTS.md` - spatial bucket and rendering requirements

@@ -20,9 +20,9 @@ hierarchical hex clusters, or hardcoded scenario constants spread through UI cod
 
 ## Three jobs
 
-1. **HexSim** — L0 only, neighbor propagation  
-2. **AggregateCache** — dirty L1→L3  
-3. **MapRenderer** — zoom → level  
+1. **HexSim** - L0 only, neighbor propagation
+2. **AggregateCache** - dirty L1 to L3
+3. **MapRenderer** - zoom to level
 
 Game logic adds scenario, agent, resource, and economy layers above those three jobs. Keep those
 systems separate so the map renderer never becomes the simulation.
