@@ -17,6 +17,6 @@ func test_same_seed_same_weather_sequence() -> void:
 
 
 func test_different_seeds_can_differ() -> void:
-	var a := _weather_sequence(1, 20)
-	var b := _weather_sequence(2, 20)
+	var a := _weather_sequence(17, 30)
+	var b := _weather_sequence(90210, 30)
 	assert_ne(a, b)

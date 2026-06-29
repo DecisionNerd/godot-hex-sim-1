@@ -1,9 +1,15 @@
 extends Node
 
 const PlotState = preload("res://scripts/farming/plot_state.gd")
+const FieldRes = preload("res://scripts/farming/field.gd")
 const CropDefinition = preload("res://scripts/farming/crop_definition.gd")
+const WorkZoneRes = preload("res://scripts/work/work_zone.gd")
 const HexSim = preload("res://scripts/world/hex_sim.gd")
-const HexState = preload("res://scripts/world/hex_state.gd")
+const HexStateRes = preload("res://scripts/world/hex_state.gd")
+const HexTopology = preload("res://scripts/world/hex_topology.gd")
+const StructureRes = preload("res://scripts/world/structure.gd")
+const HexEdge = preload("res://scripts/world/hex_edge.gd")
+const Trader = preload("res://scripts/systems/trader.gd")
 const Person = preload("res://scripts/entities/person.gd")
 const Holding = preload("res://scripts/entities/holding.gd")
 const Agent = preload("res://scripts/entities/agent.gd")
@@ -13,6 +19,8 @@ const FarmBuilding = preload("res://scripts/world/farm_building.gd")
 const TerrainClassifier = preload("res://scripts/world/terrain_classifier.gd")
 const MapGenerator = preload("res://scripts/world/map_generator.gd")
 const HexGrid = preload("res://scripts/world/hex_grid.gd")
+const WestTheme = preload("res://scripts/theme/west_theme.gd")
+const ScenarioCatalog = preload("res://scripts/scenarios/scenario_catalog.gd")
 
 signal season_changed(season: int, year: int)
 signal weather_changed(weather: int)
@@ -28,48 +36,72 @@ enum Weather { CLEAR, RAIN, DROUGHT, FROST }
 
 const DAYS_PER_SEASON := 91
 const DAYS_PER_YEAR := DAYS_PER_SEASON * 4
-const HOUSEHOLD_FOOD_PER_DAY := 2.0 / 7.0
+const FOOD_PER_PERSON_DAY := 1
+const WATER_PER_PERSON_DAY := 1
+const FIREWOOD_PER_WINTER_DAY := 1
 const HUNGRY_DAYS_TO_LOSE := 7
-const CLAIM_PLOT_FOOD_COST := 2
-const CLEAR_WOOD_FOOD_COST := 3
+const SAVE_VERSION := 3
 
-## Labour model: a hex is ~10 m², so a worker covers several per day.
-## The head of household contributes this many work-units; family add their own.
 const LABOR_HEAD := 10
 const SPOUSE_LABOR := 10
 const CHILD_LABOR := 5
-## Work-unit cost to complete one task on a single ~10 m² hex.
 const TASK_COST := {
-	"tend": 1,
-	"plant": 2,
-	"harvest": 2,
-	"claim": 6,
-	"clear_wood": 12,
+	"forage": 1,
+	"clear": 3,
+	"collect_water": 1,
+	"trap": 2,
+	"chop_firewood": 2,
+	"plant_field": 4,
+	"tend_field": 2,
+	"harvest_field": 3,
+	"build": 8,
+	"fence": 2,
 }
-## Order in which queued orders claim the day's labour.
-const ORDER_PRIORITY: Array[String] = ["harvest", "tend", "plant", "claim", "clear_wood"]
+const ZONE_PRIORITY: Array[int] = [
+	WorkZoneRes.ZoneType.COLLECT_WATER,
+	WorkZoneRes.ZoneType.TRAP,
+	WorkZoneRes.ZoneType.FORAGE,
+	WorkZoneRes.ZoneType.CLEAR,
+	WorkZoneRes.ZoneType.BUILD,
+]
 
 var rng := RandomNumberGenerator.new()
 var year: int = 1
-var season: Season = Season.SPRING
+var season: Season = Season.SUMMER
 var weather: Weather = Weather.CLEAR
 var food_consumption_accumulator: float = 0.0
+var water_consumption_accumulator: float = 0.0
 var resources: Dictionary = {
-	"food": 10,
-	"wheat_seed": 6,
-	"barley_seed": 6,
+	"food": 20,
+	"water": 15,
+	"firewood": 5,
+	"wood": 10,
+	"berries": 0,
+	"roots": 0,
+	"mushrooms": 0,
+	"meat": 0,
+	"coins": 15,
+	"tools": 2,
+	"corn_seed": 4,
+	"bean_seed": 4,
 }
+var fields: Dictionary = {}
+var work_zones: Dictionary = {}
+var fences: Dictionary = {}
+var active_zone_id: String = ""
+var active_field_id: String = ""
+var zone_paint_mode: int = WorkZoneRes.ZoneType.FORAGE
+var settlement_chosen: bool = false
 var plots: Dictionary = {}
 var crops: Dictionary = {}
-## Queued work the player has planned: Vector2i -> {type, crop_id, work}.
 var orders: Dictionary = {}
-## Household labour for the current day.
 var labor_per_day: int = LABOR_HEAD
 var labor_pool: int = LABOR_HEAD
 var log_lines: PackedStringArray = []
 var home_hex: Vector2i = Vector2i.ZERO
 var hex_sim: HexSim
 var buildings: Dictionary = {}
+var structures: Dictionary = {}
 var cleared_woods: Array[Vector2i] = []
 var persons: Array = []
 var holdings: Array = []
@@ -81,14 +113,17 @@ var game_lost: bool = false
 var consecutive_hungry_days: int = 0
 var last_game_over_reason: String = ""
 var _map: TileMapLayer
-var _terrain_cells: Dictionary = {}
+var _world_generated: bool = false
 var _batch_mode: bool = false
 var _batch_stats: Dictionary = {}
 var _pending_load: Dictionary = {}
 var _worked_today: bool = false
+var active_scenario = null
 
 
 func _ready() -> void:
+	if active_scenario == null:
+		active_scenario = ScenarioCatalog.get_default()
 	_register_crops()
 	TurnManager.turn_ended.connect(_on_day_ended)
 
@@ -97,16 +132,30 @@ func start_new_game(seed: int = -1) -> void:
 	if seed < 0:
 		seed = int(Time.get_ticks_msec())
 	year = 1
-	season = Season.SPRING
+	season = Season.SUMMER
 	weather = Weather.CLEAR
 	food_consumption_accumulator = 0.0
+	water_consumption_accumulator = 0.0
 	resources = {
-		"food": 10,
-		"wheat_seed": 6,
-		"barley_seed": 6,
+		"food": 20,
+		"water": 15,
+		"firewood": 5,
+		"wood": 10,
+		"berries": 0,
+		"roots": 0,
+		"mushrooms": 0,
+		"meat": 0,
+		"coins": 15,
+		"tools": 2,
+		"corn_seed": 4,
+		"bean_seed": 4,
 	}
+	fields.clear()
+	work_zones.clear()
+	fences.clear()
 	plots.clear()
 	orders.clear()
+	structures.clear()
 	log_lines.clear()
 	buildings.clear()
 	cleared_woods.clear()
@@ -114,17 +163,41 @@ func start_new_game(seed: int = -1) -> void:
 	_batch_stats = {}
 	_worked_today = false
 	home_hex = Vector2i.ZERO
+	settlement_chosen = false
+	_world_generated = false
 	game_lost = false
 	consecutive_hungry_days = 0
 	last_game_over_reason = ""
 	game_active = true
 	_pending_load = {}
-	_terrain_cells = {}
+	active_scenario = ScenarioCatalog.get_default()
 	rng.seed = seed
 	if crops.is_empty():
 		_register_crops()
 	TurnManager.reset_for_test()
 	_roll_weather()
+
+
+func begin_settlement(coords: Vector2i) -> void:
+	ensure_world_map()
+	home_hex = coords
+	settlement_chosen = true
+	year = 1
+	season = Season.SUMMER
+	TurnManager.reset_for_test(1)
+	_setup_household()
+	if hex_sim != null:
+		var hex = hex_sim.get_hex(coords)
+		if hex != null:
+			hex.ownership = "player"
+			hex.cleared = true
+			hex.veg_class = HexStateRes.VegClass.GRASS
+			hex.sync_terrain()
+			hex_sim.mark_dirty(coords)
+			hex_sim.flush_aggregates()
+	_place_starting_shelter()
+	_log(active_scenario.opening_log)
+	refresh_labor()
 
 
 func has_save() -> bool:
@@ -143,50 +216,67 @@ func can_continue() -> bool:
 func save_game() -> bool:
 	if not game_active:
 		return false
-	var plot_data: Array = []
-	for coords in plots:
-		var plot: PlotState = plots[coords]
-		plot_data.append({
-			"x": coords.x,
-			"y": coords.y,
-			"crop_id": plot.crop_id,
-			"growth_days": plot.growth_days,
-			"tended": plot.tended,
-		})
 	return SaveManager.write({
-		"version": 1,
+		"version": SAVE_VERSION,
 		"seed": rng.seed,
 		"turn": TurnManager.turn_number,
 		"year": year,
 		"season": season,
 		"weather": weather,
 		"food_accum": food_consumption_accumulator,
+		"water_accum": water_consumption_accumulator,
 		"resources": resources.duplicate(),
 		"home_x": home_hex.x,
 		"home_y": home_hex.y,
-		"plots": plot_data,
-		"buildings": _serialize_buildings(),
-		"cleared_woods": _serialize_coords_list(cleared_woods),
+		"settlement_chosen": settlement_chosen,
+		"hexes": hex_sim.serialize_hexes() if hex_sim != null else [],
+		"fields": _serialize_fields(),
+		"work_zones": _serialize_work_zones(),
+		"structures": _serialize_structures(),
+		"fences": HexEdge.to_dict(fences),
+		"persons": _serialize_persons(),
+		"active_field_id": active_field_id,
+		"active_zone_id": active_zone_id,
 		"hungry_days": consecutive_hungry_days,
 		"game_lost": game_lost,
 		"game_over_reason": last_game_over_reason,
 		"labor_pool": labor_pool,
 		"labor_per_day": labor_per_day,
-		"orders": _serialize_orders(),
 		"log": Array(log_lines),
+		"scenario_id": active_scenario.id if active_scenario != null else ScenarioCatalog.DEFAULT_SCENARIO_ID,
 	})
 
 
-func _serialize_orders() -> Array:
+func _serialize_fields() -> Array:
 	var out: Array = []
-	for coords in orders:
-		var order: Dictionary = orders[coords]
+	for field_id in fields:
+		out.append(fields[field_id].to_dict())
+	return out
+
+
+func _serialize_work_zones() -> Array:
+	var out: Array = []
+	for zone_id in work_zones:
+		out.append(work_zones[zone_id].to_dict())
+	return out
+
+
+func _serialize_structures() -> Array:
+	var out: Array = []
+	for coords in structures:
+		out.append(structures[coords].to_dict())
+	return out
+
+
+func _serialize_persons() -> Array:
+	var out: Array = []
+	for person in persons:
 		out.append({
-			"x": coords.x,
-			"y": coords.y,
-			"type": order.get("type", ""),
-			"crop_id": order.get("crop_id", ""),
-			"work": int(order.get("work", 0)),
+			"id": person.id,
+			"name": person.display_name,
+			"health": person.health,
+			"alive": person.alive,
+			"labor": person.daily_labor,
 		})
 	return out
 
@@ -203,45 +293,54 @@ func load_game() -> bool:
 func apply_loaded_state() -> void:
 	if _pending_load.is_empty():
 		return
-	var data := _pending_load
+	var data := _migrate_loaded_data(_pending_load.duplicate(true))
 	_pending_load = {}
 	rng.seed = int(data.get("seed", 12345))
 	TurnManager.reset_for_test(int(data.get("turn", 1)))
 	year = int(data.get("year", 1))
-	season = data.get("season", Season.SPRING) as Season
+	season = data.get("season", Season.SUMMER) as Season
 	weather = data.get("weather", Weather.CLEAR) as Weather
 	food_consumption_accumulator = float(data.get("food_accum", 0.0))
+	water_consumption_accumulator = float(data.get("water_accum", 0.0))
 	resources = data.get("resources", resources).duplicate()
 	home_hex = Vector2i(int(data.get("home_x", 0)), int(data.get("home_y", 0)))
+	settlement_chosen = bool(data.get("settlement_chosen", true))
 	consecutive_hungry_days = int(data.get("hungry_days", 0))
 	game_lost = bool(data.get("game_lost", false))
 	last_game_over_reason = str(data.get("game_over_reason", ""))
 	log_lines = PackedStringArray()
 	for line in data.get("log", []):
 		log_lines.append(str(line))
+	fields.clear()
+	for entry in data.get("fields", []):
+		var field = FieldRes.from_dict(entry)
+		fields[field.id] = field
+	work_zones.clear()
+	for entry in data.get("work_zones", []):
+		var zone = WorkZoneRes.from_dict(entry)
+		work_zones[zone.id] = zone
+	structures.clear()
+	buildings.clear()
+	for entry in data.get("structures", []):
+		var s = StructureRes.from_dict(entry)
+		structures[s.coords] = s
+	fences = HexEdge.from_dict_array(data.get("fences", []))
+	active_field_id = str(data.get("active_field_id", ""))
+	active_zone_id = str(data.get("active_zone_id", ""))
 	plots.clear()
-	for entry in data.get("plots", []):
-		var coords := Vector2i(int(entry["x"]), int(entry["y"]))
-		var plot := PlotState.new()
-		plot.crop_id = str(entry.get("crop_id", ""))
-		plot.growth_days = int(entry.get("growth_days", 0))
-		plot.tended = bool(entry.get("tended", false))
-		plots[coords] = plot
-	_setup_household()
 	orders.clear()
-	for entry in data.get("orders", []):
-		var ocoords := Vector2i(int(entry["x"]), int(entry["y"]))
-		orders[ocoords] = {
-			"type": str(entry.get("type", "")),
-			"crop_id": str(entry.get("crop_id", "")),
-			"work": int(entry.get("work", 0)),
-		}
+	_setup_household()
+	for entry in data.get("persons", []):
+		for person in persons:
+			if person.id == str(entry.get("id", "")):
+				person.health = int(entry.get("health", 100))
+				person.alive = bool(entry.get("alive", true))
 	labor_per_day = int(data.get("labor_per_day", household_labor()))
 	labor_pool = int(data.get("labor_pool", labor_per_day))
-	_load_buildings_from_save(data.get("buildings", []))
-	cleared_woods.clear()
-	for entry in data.get("cleared_woods", []):
-		cleared_woods.append(Vector2i(int(entry["x"]), int(entry["y"])))
+	active_scenario = ScenarioCatalog.get_scenario(str(data.get("scenario_id", ScenarioCatalog.DEFAULT_SCENARIO_ID)))
+	hex_sim = HexSim.new()
+	hex_sim.load_hexes(data.get("hexes", []))
+	_world_generated = true
 	game_started.emit()
 
 
@@ -280,52 +379,63 @@ func init_plots_from_map(tile_map: TileMapLayer) -> void:
 	MapGenerator.prepare_tile_map(tile_map)
 	if not _pending_load.is_empty():
 		rng.seed = int(_pending_load.get("seed", rng.seed))
-	if not _pending_load.is_empty() or SceneRouter.entering_new_game or _terrain_cells.is_empty():
-		_generate_world_map()
-	var needs_fresh_plots := plots.is_empty() or SceneRouter.entering_new_game
 	if not _pending_load.is_empty():
 		apply_loaded_state()
-		_rebuild_world_from_map(tile_map)
-		_sync_hex_from_plots()
+		_rebuild_world_from_save()
 		game_started.emit()
 		return
-	if game_lost and not SceneRouter.entering_new_game:
-		start_new_game()
-		_generate_world_map()
-		needs_fresh_plots = true
-	if needs_fresh_plots:
-		plots.clear()
-		home_hex = MapGenerator.pick_home_hex(_terrain_cells)
-		plots[home_hex] = PlotState.new()
-		var neighbors: Array[Vector2i] = HexGrid.neighbors(home_hex)
-		var added := 1
-		for coords in neighbors:
-			if added >= 8:
-				break
-			if not _terrain_cells.has(coords):
-				continue
-			if _terrain_cells[coords] == HexState.TERRAIN_WATER:
-				continue
-			if plots.has(coords):
-				continue
-			plots[coords] = PlotState.new()
-			added += 1
-	_setup_household()
+	if not settlement_chosen and SceneRouter.entering_new_game:
+		ensure_world_map()
+		return
+	if not _world_generated:
+		generate_world_map()
+	if settlement_chosen and persons.is_empty():
+		_setup_household()
 	_rebuild_world_from_map(tile_map)
-	_sync_hex_from_plots()
-	_log("Spring day 1. Click a plot, assign labor, end the day. Family will help when they can.")
-	if game_active:
+	if settlement_chosen:
+		_log("Summer %d (%s). Prepare the claim for winter." % [
+			scenario_calendar_year(),
+			WestTheme.era_name(scenario_calendar_year()),
+		])
+	if game_active and settlement_chosen:
 		game_started.emit()
 
 
-func _generate_world_map() -> void:
-	_terrain_cells = MapGenerator.generate_terrain(rng)
+func generate_world_map() -> void:
+	hex_sim = HexSim.new()
+	var hexes := MapGenerator.generate_world(rng)
+	hex_sim.build_from_hex_dict(hexes, home_hex)
+	_world_generated = true
+
+
+func ensure_world_map() -> void:
+	if not _world_generated or hex_sim == null:
+		generate_world_map()
+
+
+func is_settleable(coords: Vector2i) -> bool:
+	if hex_sim == null:
+		return false
+	var hex = hex_sim.get_hex(coords)
+	return HexTopology.is_settleable(hex)
 
 
 func world_coords() -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	for coords in _terrain_cells:
+	if hex_sim == null:
+		return out
+	for coords in hex_sim.hexes:
 		out.append(coords)
+	return out
+
+
+func visible_coords(world_rect: Rect2) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if hex_sim == null:
+		return out
+	for coords in HexGrid.cells_in_rect(world_rect, 2):
+		if hex_sim.hexes.has(coords):
+			out.append(coords)
 	return out
 
 
@@ -342,7 +452,7 @@ func _setup_household() -> void:
 
 	player_holding = Holding.new()
 	player_holding.id = "player_farm"
-	player_holding.name = "Your holding"
+	player_holding.name = "Your claim"
 	player_holding.owner_id = "player"
 	player_holding.home_hex = home_hex
 	holdings.append(player_holding)
@@ -385,45 +495,60 @@ func _setup_neighbor_holding() -> void:
 				candidate = coords
 				break
 	var neighbor := Holding.new()
-	neighbor.id = "miller_farm"
-	neighbor.name = "Miller holding"
-	neighbor.owner_id = "miller"
+	neighbor.id = "del_valle_rancho"
+	neighbor.name = "Del Valle rancho"
+	neighbor.owner_id = "del_valle"
 	neighbor.home_hex = candidate
 	holdings.append(neighbor)
 	var steward := Agent.new()
-	steward.id = "miller_steward"
-	steward.name = "Miller steward"
+	steward.id = "del_valle_steward"
+	steward.name = "Hacienda del Valle steward"
 	steward.holding_id = neighbor.id
 	steward.hex_coords = candidate
 	steward.is_player = false
 	agents.append(steward)
 	if hex_sim.get_hex(candidate) != null:
-		hex_sim.get_hex(candidate).ownership = "miller"
+		hex_sim.get_hex(candidate).ownership = "del_valle"
 		hex_sim.get_hex(candidate).population = 3
 
 
-func _rebuild_world_from_map(tile_map: TileMapLayer) -> void:
-	hex_sim = HexSim.new()
-	var plot_list: Array[Vector2i] = []
-	for coords in plots:
-		plot_list.append(coords)
-	if player_holding != null:
-		player_holding.plot_coords = plot_list
-	hex_sim.build_from_terrain(_terrain_cells, plot_list)
-	_apply_cleared_woods()
-	_place_starting_buildings()
+func _rebuild_world_from_map(_tile_map: TileMapLayer) -> void:
+	if hex_sim == null:
+		generate_world_map()
 	_setup_neighbor_holding()
+
+
+func _rebuild_world_from_save() -> void:
+	if hex_sim == null:
+		generate_world_map()
+	_setup_neighbor_holding()
+	_sync_fields_to_hexes()
+
+
+func _place_starting_shelter() -> void:
+	structures.clear()
+	buildings.clear()
+	var shelter = StructureRes.new()
+	shelter.kind = StructureRes.Kind.SHELTER
+	shelter.display_name = "Dugout"
+	shelter.coords = home_hex
+	structures[home_hex] = shelter
+	var hex = get_hex(home_hex)
+	if hex != null:
+		hex.structure_id = "shelter"
+		hex_sim.mark_dirty(home_hex)
+		hex_sim.flush_aggregates()
 
 
 func _sync_hex_from_plots() -> void:
 	if hex_sim == null:
 		return
 	for coords in plots:
-		var hex: HexState = hex_sim.get_hex(coords)
+		var hex = hex_sim.get_hex(coords)
 		if hex == null:
 			continue
 		var plot: PlotState = plots[coords]
-		hex.terrain = HexState.TERRAIN_FARMLAND
+		hex.terrain = HexStateRes.TERRAIN_FARMLAND
 		hex.food = 0
 		if not plot.is_empty():
 			var crop: CropDefinition = get_crop(plot.crop_id)
@@ -431,7 +556,7 @@ func _sync_hex_from_plots() -> void:
 				hex.food = crop.yield_food if plot.is_mature(crop) else 0
 		hex.population = 1 if coords == home_hex else 0
 		hex_sim.mark_dirty(coords)
-	var home: HexState = hex_sim.get_hex(home_hex)
+	var home = hex_sim.get_hex(home_hex)
 	if home != null:
 		home.population = 1 + persons.size()
 	hex_sim.flush_aggregates()
@@ -449,33 +574,17 @@ func player_message(message: String) -> void:
 
 
 func reset_for_test(seed: int = 12345) -> void:
-	year = 1
-	season = Season.SPRING
-	weather = Weather.CLEAR
-	food_consumption_accumulator = 0.0
-	resources = {
-		"food": 10,
-		"wheat_seed": 6,
-		"barley_seed": 6,
-	}
-	plots.clear()
-	orders.clear()
-	log_lines.clear()
-	buildings.clear()
-	cleared_woods.clear()
-	_batch_mode = false
-	_batch_stats = {}
-	_worked_today = false
-	home_hex = Vector2i(0, 0)
-	plots[home_hex] = PlotState.new()
-	game_lost = false
-	consecutive_hungry_days = 0
-	last_game_over_reason = ""
-	rng.seed = seed
-	if crops.is_empty():
-		_register_crops()
-	_sync_calendar_from_turn(1)
-	_setup_household()
+	start_new_game(seed)
+	ensure_world_map()
+	var settle := _first_settleable_hex()
+	begin_settlement(settle)
+
+
+func _first_settleable_hex() -> Vector2i:
+	for coords in hex_sim.hexes:
+		if is_settleable(coords):
+			return coords
+	return Vector2i.ZERO
 
 
 func resolve_day(ended_day: int) -> void:
@@ -483,128 +592,138 @@ func resolve_day(ended_day: int) -> void:
 
 
 func _register_crops() -> void:
-	var wheat := CropDefinition.new()
-	wheat.id = "wheat"
-	wheat.display_name = "Wheat"
-	wheat.plant_seasons = [Season.SPRING, Season.AUTUMN]
-	wheat.grow_days = 28
-	wheat.yield_food = 8
-	wheat.seed_resource = "wheat_seed"
-	wheat.frost_tolerant = false
-	crops[wheat.id] = wheat
+	var corn := CropDefinition.new()
+	corn.id = "corn"
+	corn.display_name = "Corn"
+	corn.plant_seasons = [Season.SPRING, Season.AUTUMN]
+	corn.grow_days = 28
+	corn.yield_food = 8
+	corn.seed_resource = "corn_seed"
+	corn.frost_tolerant = false
+	crops[corn.id] = corn
 
-	var barley := CropDefinition.new()
-	barley.id = "barley"
-	barley.display_name = "Barley"
-	barley.plant_seasons = [Season.SPRING, Season.SUMMER]
-	barley.grow_days = 21
-	barley.yield_food = 5
-	barley.seed_resource = "barley_seed"
-	barley.frost_tolerant = true
-	crops[barley.id] = barley
+	var beans := CropDefinition.new()
+	beans.id = "beans"
+	beans.display_name = "Beans"
+	beans.plant_seasons = [Season.SPRING, Season.SUMMER]
+	beans.grow_days = 21
+	beans.yield_food = 5
+	beans.seed_resource = "bean_seed"
+	beans.frost_tolerant = true
+	crops[beans.id] = beans
 
 
 func is_farm_plot(coords: Vector2i) -> bool:
-	return plots.has(coords)
+	var hex = get_hex(coords)
+	return hex != null and hex.field_id != ""
 
 
-func get_building(coords: Vector2i) -> FarmBuilding:
-	return buildings.get(coords)
+func is_home_hex(coords: Vector2i) -> bool:
+	return coords == home_hex
 
 
-func hex_terrain(coords: Vector2i) -> int:
-	if _terrain_cells.has(coords):
-		return _terrain_cells[coords]
-	if hex_sim == null:
-		return HexState.TERRAIN_GRASS
-	var hex: HexState = hex_sim.get_hex(coords)
-	if hex == null:
-		return HexState.TERRAIN_GRASS
-	return hex.terrain
+func get_building(coords: Vector2i):
+	return structures.get(coords)
 
 
-func is_adjacent_to_holding(coords: Vector2i) -> bool:
-	if _map == null:
-		return false
-	for owned in plots:
-		if coords in HexGrid.neighbors(owned):
-			return true
+func get_structure(coords: Vector2i):
+	return structures.get(coords)
+
+
+func can_claim_plot(_coords: Vector2i) -> bool:
 	return false
 
 
-func can_claim_plot(coords: Vector2i) -> bool:
-	if plots.has(coords):
-		return false
-	if not _terrain_cells.has(coords):
-		return false
-	if _terrain_cells[coords] == HexState.TERRAIN_WATER:
-		return false
-	if hex_sim == null or hex_sim.get_hex(coords) == null:
-		return false
-	if not is_adjacent_to_holding(coords):
-		return false
-	var terrain := hex_terrain(coords)
-	return terrain == HexState.TERRAIN_GRASS
-
-
 func can_clear_wood(coords: Vector2i) -> bool:
-	if plots.has(coords):
-		return false
-	if hex_terrain(coords) != HexState.TERRAIN_WOOD:
-		return false
-	return is_adjacent_to_holding(coords)
+	var hex = get_hex(coords)
+	return hex != null and hex.standing_timber > 0.0
 
 
 func try_clear_wood(coords: Vector2i) -> String:
-	return _spend_labor("clear_wood", _do_clear_wood(coords))
+	return try_chop_firewood(coords)
 
 
-func _do_clear_wood(coords: Vector2i) -> String:
+func try_chop_firewood(coords: Vector2i) -> String:
 	if game_lost:
 		return "Game over."
-	if not can_clear_wood(coords):
-		return "Select woodland next to your holding."
-	if resources.get("food", 0) < CLEAR_WOOD_FOOD_COST:
-		return "Need %d food to clear woodland." % CLEAR_WOOD_FOOD_COST
-	resources["food"] -= CLEAR_WOOD_FOOD_COST
-	var hex: HexState = hex_sim.get_hex(coords)
-	if hex != null:
-		hex.terrain = HexState.TERRAIN_GRASS
-		hex.forest = 0.0
-		cleared_woods.append(coords)
-		hex_sim.mark_dirty(coords)
-		hex_sim.flush_aggregates()
-	resources_changed.emit()
-	_log("Cleared woodland (%d food)." % CLEAR_WOOD_FOOD_COST)
-	return "ok"
-
-
-func try_claim_plot(coords: Vector2i) -> String:
-	return _spend_labor("claim", _do_claim(coords))
-
-
-func _do_claim(coords: Vector2i) -> String:
-	if game_lost:
-		return "Game over."
-	if not can_claim_plot(coords):
-		return "Must claim land next to your holding."
-	if resources.get("food", 0) < CLAIM_PLOT_FOOD_COST:
-		return "Need %d food to clear brush." % CLAIM_PLOT_FOOD_COST
-	resources["food"] -= CLAIM_PLOT_FOOD_COST
-	plots[coords] = PlotState.new()
-	player_holding.plot_coords.append(coords)
-	hex_sim.plot_coords[coords] = true
-	var hex: HexState = hex_sim.get_hex(coords)
-	if hex != null:
-		hex.terrain = HexState.TERRAIN_FARMLAND
-		hex.forest = 0.0
-		hex.ownership = "player"
-		hex_sim.mark_dirty(coords)
-	hex_sim.flush_aggregates()
+	var result := hex_sim.apply_work(coords, "chop_firewood", {})
+	if not result.get("ok", false):
+		return str(result.get("reason", "Cannot chop here."))
+	_apply_work_yields(result)
 	resources_changed.emit()
 	plot_changed.emit(coords)
-	_log("Cleared new plot (%d food)." % CLAIM_PLOT_FOOD_COST)
+	_log("Chopped firewood at (%d,%d)." % [coords.x, coords.y])
 	return "ok"
+
+
+func try_claim_plot(_coords: Vector2i) -> String:
+	return "Claiming is replaced by work zones."
+
+
+func hex_terrain(coords: Vector2i) -> int:
+	if hex_sim == null:
+		return HexStateRes.TERRAIN_GRASS
+	var hex = hex_sim.get_hex(coords)
+	if hex == null:
+		return HexStateRes.TERRAIN_GRASS
+	return hex.terrain
+
+
+func get_hex(coords: Vector2i):
+	if hex_sim == null:
+		return null
+	return hex_sim.get_hex(coords)
+
+
+func hex_status(coords: Vector2i) -> String:
+	var hex = get_hex(coords)
+	if hex == null:
+		return "Unknown hex."
+	var parts: PackedStringArray = []
+	parts.append("Elev %.0f m · slope %.1f" % [hex.elevation, hex.slope_grade])
+	parts.append("Soil %s · fertility %.0f%%" % [_soil_name(hex.soil_type), hex.fertility * 100.0])
+	if hex.is_water():
+		parts.append("Water (depth %.1f)" % hex.water_depth)
+	elif hex.is_riparian:
+		parts.append("Acequia runoff — good for water")
+	elif hex.is_spring:
+		parts.append("Spring seep — haul water here")
+	if hex.has_forage():
+		parts.append("Gathering available")
+	elif hex.forage_depleted:
+		parts.append("Picked clean this season")
+	if hex.veg_class == HexStateRes.VegClass.SHRUB:
+		parts.append("Mesquite scrub")
+	if hex.standing_timber > 0:
+		parts.append("Standing timber: %d" % int(hex.standing_timber))
+	if hex.field_id != "":
+		parts.append("In field %s" % hex.field_id)
+	if hex.structure_id != "":
+		parts.append("Structure: %s" % hex.structure_id)
+	if hex.lore_tag != HexStateRes.LoreTag.NONE:
+		var lore := WestTheme.lore_line(hex.lore_tag)
+		if not lore.is_empty():
+			parts.append(lore)
+	return "\n".join(parts)
+
+
+func _soil_name(soil: int) -> String:
+	match soil:
+		HexStateRes.SoilType.CLAY: return "clay"
+		HexStateRes.SoilType.SAND: return "sand"
+		HexStateRes.SoilType.PEAT: return "peat"
+		HexStateRes.SoilType.ROCKY: return "rocky"
+	return "loam"
+
+
+func is_adjacent_to_holding(coords: Vector2i) -> bool:
+	if hex_sim == null:
+		return false
+	for neighbor in HexGrid.neighbors(coords):
+		var hex = get_hex(neighbor)
+		if hex != null and (hex.ownership == "player" or hex.field_id != ""):
+			return true
+	return coords in HexGrid.neighbors(home_hex)
 
 
 func get_plot(coords: Vector2i) -> PlotState:
@@ -612,7 +731,35 @@ func get_plot(coords: Vector2i) -> PlotState:
 
 
 func get_crop(crop_id: String) -> CropDefinition:
-	return crops.get(crop_id)
+	return crops.get(WestTheme.normalize_crop_id(crop_id))
+
+
+func _migrate_loaded_data(data: Dictionary) -> Dictionary:
+	var version := int(data.get("version", 1))
+	if version >= SAVE_VERSION:
+		return data
+	var resources_data: Dictionary = data.get("resources", {}).duplicate()
+	for old_key in WestTheme.SEED_ALIASES:
+		if resources_data.has(old_key):
+			var new_key: String = WestTheme.SEED_ALIASES[old_key]
+			resources_data[new_key] = int(resources_data.get(new_key, 0)) + int(resources_data[old_key])
+			resources_data.erase(old_key)
+	data["resources"] = resources_data
+	var fields_data: Array = data.get("fields", [])
+	for i in fields_data.size():
+		var entry: Dictionary = fields_data[i]
+		if entry.has("crop_id"):
+			entry["crop_id"] = WestTheme.normalize_crop_id(str(entry.get("crop_id", "")))
+		fields_data[i] = entry
+	data["fields"] = fields_data
+	var zones_data: Array = data.get("work_zones", [])
+	for i in zones_data.size():
+		var entry: Dictionary = zones_data[i]
+		if entry.has("crop_id") and not str(entry.get("crop_id", "")).is_empty():
+			entry["crop_id"] = WestTheme.normalize_crop_id(str(entry.get("crop_id", "")))
+		zones_data[i] = entry
+	data["version"] = SAVE_VERSION
+	return data
 
 
 # --- Labour pool ---------------------------------------------------------
@@ -634,194 +781,431 @@ func task_cost(type: String) -> int:
 	return int(TASK_COST.get(type, 1))
 
 
-# --- Order queue ---------------------------------------------------------
+# --- Work zones ----------------------------------------------------------
 
-func order_for(coords: Vector2i) -> Dictionary:
-	return orders.get(coords, {})
-
-
-func has_order(coords: Vector2i) -> bool:
-	return orders.has(coords)
+func _next_zone_id() -> String:
+	return "zone_%d" % (work_zones.size() + 1)
 
 
-func order_count() -> int:
-	return orders.size()
+func create_zone(type: int, crop_id: String = "", structure_kind: String = "") -> String:
+	var zone := WorkZoneRes.new()
+	zone.id = _next_zone_id()
+	zone.type = type as WorkZoneRes.ZoneType
+	zone.crop_id = crop_id
+	zone.structure_kind = structure_kind
+	work_zones[zone.id] = zone
+	active_zone_id = zone.id
+	return zone.id
 
 
-func can_order(coords: Vector2i, type: String, _crop_id: String = "") -> bool:
-	match type:
-		"tend", "harvest", "plant":
-			return is_farm_plot(coords)
-		"claim":
-			return can_claim_plot(coords)
-		"clear_wood":
-			return can_clear_wood(coords)
-	return false
+func active_zone():
+	return work_zones.get(active_zone_id)
 
 
-func assign_order(coords: Vector2i, type: String, crop_id: String = "") -> String:
-	if game_lost:
-		return "Game over."
-	if not can_order(coords, type, crop_id):
-		return "Can't plan that here."
-	orders[coords] = {"type": type, "crop_id": crop_id, "work": 0}
+func add_hex_to_active_zone(coords: Vector2i) -> bool:
+	var zone = active_zone()
+	if zone == null:
+		return false
+	if coords in zone.hexes:
+		return false
+	if not hex_sim.hexes.has(coords):
+		return false
+	zone.hexes.append(coords)
 	plot_changed.emit(coords)
-	return "ok"
+	return true
 
 
-func cancel_order(coords: Vector2i) -> bool:
-	if orders.erase(coords):
-		plot_changed.emit(coords)
-		return true
-	return false
+func remove_hex_from_zones(coords: Vector2i) -> void:
+	for zone_id in work_zones:
+		var zone = work_zones[zone_id]
+		var idx: int = zone.hexes.find(coords)
+		if idx >= 0:
+			zone.hexes.remove_at(idx)
+	plot_changed.emit(coords)
 
 
-func order_label(coords: Vector2i) -> String:
-	var order := order_for(coords)
-	if order.is_empty():
-		return ""
-	match String(order.get("type", "")):
-		"plant":
-			return "plant %s" % String(order.get("crop_id", ""))
-		"clear_wood":
-			return "clear wood"
-		var other:
-			return other
+func zone_count() -> int:
+	return work_zones.size()
 
 
-## Spend today's labour pool on queued orders, highest priority first.
+func zone_label(zone) -> String:
+	match zone.type:
+		WorkZoneRes.ZoneType.FORAGE:
+			return "gather"
+		WorkZoneRes.ZoneType.CLEAR:
+			return "clear brush"
+		WorkZoneRes.ZoneType.TRAP:
+			return "set snares"
+		WorkZoneRes.ZoneType.COLLECT_WATER:
+			return "haul water"
+		WorkZoneRes.ZoneType.BUILD:
+			if zone.structure_kind == "shelter":
+				return "raise dugout"
+			return "raise %s" % zone.structure_kind
+	return "work"
+
+
+func has_pending_orders() -> bool:
+	return not work_zones.is_empty()
+
+
 func work_today() -> void:
 	if _worked_today:
 		return
 	_worked_today = true
-	_work_orders()
+	_work_zones()
+	_work_fields()
 
 
-func _work_orders() -> void:
+func _work_fields() -> void:
 	if game_lost:
 		return
-	for type in ORDER_PRIORITY:
-		for coords in _orders_of_type(type):
-			if labor_pool <= 0:
-				return
-			_advance_order(coords)
+	for field_id in fields:
+		var field = fields[field_id]
+		if field.is_empty():
+			continue
+		var crop := get_crop(field.crop_id)
+		if crop == null:
+			continue
+		if field.is_mature(crop):
+			if labor_pool < _field_labor_cost("harvest_field", field):
+				continue
+			_harvest_field(field_id)
+		elif _field_needs_tend(field, crop) and labor_pool >= _field_labor_cost("tend_field", field):
+			field.tended = true
+			labor_pool -= _field_labor_cost("tend_field", field)
+			_log("Tended %s field." % crop.display_name)
 
 
-func _orders_of_type(type: String) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	for coords in orders:
-		if String(orders[coords].get("type", "")) == type:
-			out.append(coords)
-	return out
-
-
-func _advance_order(coords: Vector2i) -> void:
-	var order: Dictionary = orders[coords]
-	var block := _order_block_reason(coords, order)
-	if block == "invalid":
-		orders.erase(coords)
-		plot_changed.emit(coords)
+func _work_zones() -> void:
+	if game_lost:
 		return
-	if block == "wait":
+	for ztype in ZONE_PRIORITY:
+		for zone_id in work_zones:
+			var zone = work_zones[zone_id]
+			if zone.type != ztype:
+				continue
+			for coords in zone.hexes.duplicate():
+				if labor_pool <= 0:
+					return
+				_advance_zone_hex(zone, coords)
+
+
+func _zone_action_for(zone) -> String:
+	match zone.type:
+		WorkZoneRes.ZoneType.FORAGE: return "forage"
+		WorkZoneRes.ZoneType.CLEAR: return "clear"
+		WorkZoneRes.ZoneType.COLLECT_WATER: return "collect_water"
+		WorkZoneRes.ZoneType.TRAP: return "trap"
+		WorkZoneRes.ZoneType.BUILD: return "build"
+	return ""
+
+
+func _advance_zone_hex(zone, coords: Vector2i) -> void:
+	var action := _zone_action_for(zone)
+	if action == "":
 		return
-	var type := String(order.get("type", ""))
-	var cost := task_cost(type)
-	var need: int = cost - int(order.get("work", 0))
+	var cost := task_cost(action)
+	var need: int = cost - zone.work
 	if need <= 0:
 		need = cost
 	var spend: int = mini(labor_pool, need)
-	order["work"] = int(order.get("work", 0)) + spend
+	zone.work += spend
 	labor_pool -= spend
-	orders[coords] = order
-	if int(order["work"]) >= cost:
-		_apply_order_effect(coords, order)
-		orders.erase(coords)
-		plot_changed.emit(coords)
+	if zone.work < cost:
+		return
+	zone.work = 0
+	var result := hex_sim.apply_work(coords, action, {"zone": zone})
+	if result.get("ok", false):
+		_apply_work_yields(result)
+		if action == "build":
+			_do_build(coords, zone.structure_kind)
+		_log("Worked %s at (%d,%d)." % [zone_label(zone), coords.x, coords.y])
+	plot_changed.emit(coords)
+	resources_changed.emit()
 
 
-## "" = ready to work, "wait" = blocked by transient conditions, "invalid" = drop it.
-func _order_block_reason(coords: Vector2i, order: Dictionary) -> String:
-	match String(order.get("type", "")):
-		"tend":
-			var plot := get_plot(coords)
-			if plot == null or plot.is_empty():
-				return "invalid"
-			return ""
-		"harvest":
-			var plot := get_plot(coords)
-			if plot == null or plot.is_empty():
-				return "invalid"
-			var crop := get_crop(plot.crop_id)
-			if crop == null:
-				return "invalid"
-			return "" if plot.is_mature(crop) else "wait"
-		"plant":
-			var plot := get_plot(coords)
-			if plot == null:
-				return "invalid"
-			if not plot.is_empty():
-				return "invalid"
-			var crop := get_crop(String(order.get("crop_id", "")))
-			if crop == null:
-				return "invalid"
-			if season not in crop.plant_seasons:
-				return "wait"
-			if weather == Weather.FROST and not crop.frost_tolerant:
-				return "wait"
-			if resources.get(crop.seed_resource, 0) < 1:
-				return "wait"
-			return ""
-		"claim":
-			if not can_claim_plot(coords):
-				return "invalid"
-			return "wait" if resources.get("food", 0) < CLAIM_PLOT_FOOD_COST else ""
-		"clear_wood":
-			if not can_clear_wood(coords):
-				return "invalid"
-			return "wait" if resources.get("food", 0) < CLEAR_WOOD_FOOD_COST else ""
-	return "invalid"
+func _apply_work_yields(result: Dictionary) -> void:
+	for key in result.get("yields", {}):
+		resources[key] = resources.get(key, 0) + int(result["yields"][key])
+	if result.has("wood"):
+		resources["wood"] = resources.get("wood", 0) + int(result["wood"])
+	if result.has("firewood"):
+		resources["firewood"] = resources.get("firewood", 0) + int(result["firewood"])
+	if result.has("water"):
+		resources["water"] = resources.get("water", 0) + int(result["water"])
+	if result.has("meat"):
+		resources["meat"] = resources.get("meat", 0) + int(result["meat"])
 
 
-func _apply_order_effect(coords: Vector2i, order: Dictionary) -> void:
-	match String(order.get("type", "")):
-		"tend":
-			_do_tend(coords)
-		"harvest":
-			_do_harvest(coords)
-		"plant":
-			_do_plant(coords, String(order.get("crop_id", "")))
-		"claim":
-			_do_claim(coords)
-		"clear_wood":
-			_do_clear_wood(coords)
+func _do_build(coords: Vector2i, kind_name: String) -> void:
+	var kind := StructureRes.Kind.SHELTER
+	match kind_name:
+		"barn": kind = StructureRes.Kind.BARN
+		"shed": kind = StructureRes.Kind.SHED
+		"trap": kind = StructureRes.Kind.TRAP
+		"well": kind = StructureRes.Kind.WELL
+		"house": kind = StructureRes.Kind.HOUSE
+	var s = StructureRes.new()
+	s.kind = kind
+	s.coords = coords
+	s.display_name = kind_name.capitalize()
+	structures[coords] = s
+	var hex = get_hex(coords)
+	if hex != null:
+		hex.structure_id = kind_name
+		if kind == StructureRes.Kind.TRAP:
+			hex.structure_id = "trap"
 
 
-func has_pending_orders() -> bool:
-	return not orders.is_empty()
+func buy_resource(resource: String, amount: int = 1) -> bool:
+	if Trader.try_buy(resources, resource, amount):
+		resources_changed.emit()
+		_log("Bought %d %s." % [amount, resource])
+		return true
+	return false
 
 
-## True when an unordered plot needs the player's attention (mature or needs tending).
-func needs_attention() -> bool:
-	for coords in plots:
-		if has_order(coords):
-			continue
-		var plot: PlotState = plots[coords]
-		if plot.is_empty():
-			continue
-		var crop := get_crop(plot.crop_id)
-		if crop == null:
-			continue
-		if plot.is_mature(crop):
+func sell_resource(resource: String, amount: int = 1) -> bool:
+	if Trader.try_sell(resources, resource, amount):
+		resources_changed.emit()
+		_log("Sold %d %s." % [amount, resource])
+		return true
+	return false
+
+
+func has_shelter() -> bool:
+	for coords in structures:
+		var s = structures[coords]
+		if s.kind == StructureRes.Kind.SHELTER or s.kind == StructureRes.Kind.HOUSE:
 			return true
-		if _needs_tend(plot, crop):
+	return false
+
+
+# --- Fields --------------------------------------------------------------
+
+func create_field(crop_id: String = "") -> String:
+	var field = FieldRes.new()
+	field.id = "field_%d" % (fields.size() + 1)
+	field.crop_id = crop_id
+	fields[field.id] = field
+	active_field_id = field.id
+	return field.id
+
+
+func ensure_active_field() -> String:
+	if active_field_id != "" and fields.has(active_field_id):
+		return active_field_id
+	return create_field()
+
+
+func add_hex_to_field(field_id: String, coords: Vector2i) -> bool:
+	if not fields.has(field_id):
+		return false
+	var hex = get_hex(coords)
+	if hex == null or hex.is_water():
+		return false
+	var field = fields[field_id]
+	if coords in field.hexes:
+		return false
+	field.hexes.append(coords)
+	hex.field_id = field_id
+	hex.cleared = true
+	hex.sync_terrain()
+	hex_sim.mark_dirty(coords)
+	hex_sim.flush_aggregates()
+	plot_changed.emit(coords)
+	return true
+
+
+func add_hex_to_active_field(coords: Vector2i) -> bool:
+	return add_hex_to_field(ensure_active_field(), coords)
+
+
+func plant_field(field_id: String, crop_id: String) -> String:
+	if game_lost:
+		return "Game over."
+	if not fields.has(field_id):
+		return "No field."
+	var field = fields[field_id]
+	if field.hexes.is_empty():
+		return "Paint field hexes first."
+	if not field.is_empty():
+		return "Field already planted."
+	var crop := get_crop(crop_id)
+	if crop == null:
+		return "Unknown crop."
+	if season not in crop.plant_seasons:
+		return "%s cannot be planted in %s." % [crop.display_name, season_name()]
+	if resources.get(crop.seed_resource, 0) < 1:
+		return "Not enough seed."
+	var cost := _field_labor_cost("plant_field", field)
+	if labor_pool < cost:
+		return "Need %d labor to plant." % cost
+	resources[crop.seed_resource] -= 1
+	field.crop_id = crop.id
+	field.growth_days = 0
+	field.tended = false
+	field.planted_turn = TurnManager.turn_number
+	labor_pool -= cost
+	resources_changed.emit()
+	_log("Planted %s across %d hexes." % [crop.display_name, field.hex_count()])
+	return "ok"
+
+
+func _field_labor_cost(action: String, field) -> int:
+	return task_cost(action) * maxi(1, field.hex_count() / 2)
+
+
+func _field_needs_tend(field, crop: CropDefinition) -> bool:
+	if field.tended or field.is_mature(crop):
+		return false
+	if weather == Weather.DROUGHT:
+		return true
+	if weather == Weather.FROST and not crop.frost_tolerant:
+		return true
+	return false
+
+
+func _harvest_field(field_id: String) -> void:
+	var field = fields[field_id]
+	var crop := get_crop(field.crop_id)
+	if crop == null or not field.is_mature(crop):
+		return
+	var yield_amount := crop.yield_food * maxi(1, field.hex_count() / 2)
+	var cost := _field_labor_cost("harvest_field", field)
+	labor_pool -= cost
+	resources["food"] += yield_amount
+	field.clear_crop()
+	for coords in field.hexes:
+		var hex = get_hex(coords)
+		if hex != null:
+			hex.field_id = field.id
+	resources_changed.emit()
+	_log("Harvested %s (+ %d food)." % [crop.display_name, yield_amount])
+
+
+func toggle_fence(a: Vector2i, b: Vector2i) -> void:
+	var key := HexEdge.edge_key(a, b)
+	if fences.has(key):
+		fences.erase(key)
+	else:
+		fences[key] = {"level": 1, "gate": false}
+	plot_changed.emit(a)
+	plot_changed.emit(b)
+
+
+func _sync_fields_to_hexes() -> void:
+	if hex_sim == null:
+		return
+	for field_id in fields:
+		var field = fields[field_id]
+		for coords in field.hexes:
+			var hex = get_hex(coords)
+			if hex != null:
+				hex.field_id = field_id
+	hex_sim.flush_aggregates()
+
+
+# --- Legacy order stubs (UI compat) --------------------------------------
+
+func order_for(_coords: Vector2i) -> Dictionary:
+	return {}
+
+
+func order_count() -> int:
+	return work_zones.size()
+
+
+func ensure_zone(type: int, structure_kind: String = "") -> String:
+	for zone_id in work_zones:
+		var zone = work_zones[zone_id]
+		if zone.type == type and (structure_kind == "" or zone.structure_kind == structure_kind):
+			active_zone_id = zone_id
+			return zone_id
+	return create_zone(type, "", structure_kind)
+
+
+func assign_zone_hex(coords: Vector2i, type: int, structure_kind: String = "") -> String:
+	if game_lost:
+		return "Game over."
+	ensure_zone(type, structure_kind)
+	if not add_hex_to_active_zone(coords):
+		return "Cannot add hex to zone."
+	plot_changed.emit(coords)
+	return "ok"
+
+
+func assign_order(coords: Vector2i, type: String, crop_id: String = "") -> String:
+	match type:
+		"forage":
+			return assign_zone_hex(coords, WorkZoneRes.ZoneType.FORAGE)
+		"clear":
+			return assign_zone_hex(coords, WorkZoneRes.ZoneType.CLEAR)
+		"collect_water":
+			return assign_zone_hex(coords, WorkZoneRes.ZoneType.COLLECT_WATER)
+		"trap":
+			return assign_zone_hex(coords, WorkZoneRes.ZoneType.TRAP, "trap")
+		"build_shelter":
+			return assign_zone_hex(coords, WorkZoneRes.ZoneType.BUILD, "shelter")
+		"build_barn":
+			return assign_zone_hex(coords, WorkZoneRes.ZoneType.BUILD, "barn")
+		"field":
+			return "ok" if add_hex_to_active_field(coords) else "Cannot add to field."
+		"plant":
+			return plant_field(active_field_id, crop_id)
+	return "Unknown action."
+
+
+func has_order(coords: Vector2i) -> bool:
+	return _hex_in_zone(coords)
+
+
+func cancel_order(coords: Vector2i) -> bool:
+	remove_hex_from_zones(coords)
+	return true
+
+
+func order_label(coords: Vector2i) -> String:
+	for zone_id in work_zones:
+		var zone = work_zones[zone_id]
+		if coords in zone.hexes:
+			return zone_label(zone)
+	return ""
+
+
+func needs_attention() -> bool:
+	if hex_sim == null:
+		return false
+	for coords in hex_sim.hexes:
+		var hex = hex_sim.hexes[coords]
+		if hex.has_forage() and not _hex_in_zone(coords):
+			return true
+	for field_id in fields:
+		var field = fields[field_id]
+		if field.is_empty():
+			continue
+		var crop := get_crop(field.crop_id)
+		if field.is_mature(crop):
+			return true
+	return false
+
+
+func _hex_in_zone(coords: Vector2i) -> bool:
+	for zone_id in work_zones:
+		if coords in work_zones[zone_id].hexes:
 			return true
 	return false
 
 
 func family_summary() -> String:
-	if persons.size() < 2:
-		return "Family: —"
-	return "Family: %s, %s" % [persons[0].display_name, persons[1].display_name]
+	var names: PackedStringArray = []
+	for person in persons:
+		if person.alive:
+			names.append("%s (%d%%)" % [person.display_name, person.health])
+	if names.is_empty():
+		return "Family: none surviving"
+	return "Family: " + ", ".join(names)
 
 
 func holdings_summary() -> String:
@@ -829,9 +1213,44 @@ func holdings_summary() -> String:
 		return ""
 	var parts: PackedStringArray = []
 	for holding in holdings:
-		var count := plots.size() if holding.id == player_holding.id else 3
-		parts.append("%s (%d plots)" % [holding.name, count])
+		if holding.id == player_holding.id:
+			parts.append("Claim (%d,%d)" % [home_hex.x, home_hex.y])
+		else:
+			parts.append("Neighbor — %s" % holding.name)
 	return " · ".join(parts)
+
+
+func resources_summary() -> String:
+	return "%s %d · %s %d · %s %d · %s %d · %s %d" % [
+		WestTheme.resource_name("food"),
+		total_food(),
+		WestTheme.resource_name("water"),
+		resources.get("water", 0),
+		WestTheme.resource_name("firewood"),
+		resources.get("firewood", 0),
+		WestTheme.resource_name("wood"),
+		resources.get("wood", 0),
+		WestTheme.resource_name("coins"),
+		resources.get("coins", 0),
+	]
+
+
+func total_food() -> int:
+	return (
+		resources.get("food", 0)
+		+ resources.get("berries", 0)
+		+ resources.get("roots", 0)
+		+ resources.get("mushrooms", 0)
+		+ resources.get("meat", 0) * 2
+	)
+
+
+func living_count() -> int:
+	var count := 1
+	for person in persons:
+		if person.alive:
+			count += 1
+	return count
 
 
 func season_name() -> String:
@@ -856,10 +1275,28 @@ func day_in_season(turn_number: int) -> int:
 	return ((turn_number - 1) % DAYS_PER_SEASON) + 1
 
 
+func scenario_calendar_year() -> int:
+	if active_scenario == null:
+		return 1863 + year - 1
+	return active_scenario.calendar_year(year)
+
+
+func scenario_menu_line() -> String:
+	if active_scenario == null:
+		return ScenarioCatalog.get_default().menu_line()
+	return active_scenario.menu_line()
+
+
+func scenario_settlement_title() -> String:
+	if active_scenario == null:
+		return ScenarioCatalog.get_default().settlement_title
+	return active_scenario.settlement_title
+
+
 func calendar_label(turn_number: int) -> String:
 	_sync_calendar_from_turn(turn_number)
-	return "Year %d · %s · Day %d/%d · %s" % [
-		year,
+	return "%d · %s · Day %d/%d · %s" % [
+		scenario_calendar_year(),
 		season_name(),
 		day_in_season(turn_number),
 		DAYS_PER_SEASON,
@@ -1002,46 +1439,15 @@ func plot_growth_ratio(coords: Vector2i) -> float:
 
 
 func plot_status(coords: Vector2i) -> String:
-	var plot := get_plot(coords)
-	if plot == null:
-		if can_clear_wood(coords):
-			return "Woodland — clear for %d food + 1 labor, then claim." % CLEAR_WOOD_FOOD_COST
-		if can_claim_plot(coords):
-			return "Wild land — claim for %d food + 1 labor." % CLAIM_PLOT_FOOD_COST
-		return "Not a farm plot."
-	if plot.is_empty():
-		return "Empty plot — plant wheat or barley."
-	var crop: CropDefinition = get_crop(plot.crop_id)
-	if crop == null:
-		return "Unknown crop on plot."
-	if plot.is_mature(crop):
-		return "%s — ready to harvest" % crop.display_name
-	return "%s — growing (%d/%d days)%s" % [
-		crop.display_name,
-		plot.growth_days,
-		crop.grow_days,
-		" (tended)" if plot.tended else "",
-	]
+	return hex_status(coords)
 
 
 func has_actionable_work() -> bool:
-	for coords in plots:
-		if _plot_has_work(plots[coords]):
-			return true
-	for owned in plots:
-		for neighbor in HexGrid.neighbors(owned):
-			if can_clear_wood(neighbor) or can_claim_plot(neighbor):
-				return true
+	return needs_attention() or has_pending_orders()
+
+
+func _plot_has_work(_plot: PlotState) -> bool:
 	return false
-
-
-func _plot_has_work(plot: PlotState) -> bool:
-	if plot.is_empty():
-		return _can_plant_any_crop()
-	var crop: CropDefinition = get_crop(plot.crop_id)
-	if plot.is_mature(crop):
-		return true
-	return _needs_tend(plot, crop)
 
 
 func _can_plant_any_crop() -> bool:
@@ -1082,85 +1488,132 @@ func _on_day_ended(ended_day: int) -> void:
 
 func _resolve_day(ended_day: int) -> void:
 	_sync_calendar_from_turn(ended_day)
-	_advance_crops()
-	_consume_household_food_daily()
-	_check_hunger_lose()
+	_advance_fields()
+	_consume_household_daily()
+	_check_family_vitality()
 	var next_day := ended_day + 1
 	var prev_season := season
 	var prev_year := year
 	_sync_calendar_from_turn(next_day)
 	if season != prev_season or year != prev_year:
 		if not _batch_mode:
-			_log("%s of year %d begins." % [season_name(), year])
+			_log("%s of %d begins — %s." % [
+				season_name(),
+				scenario_calendar_year(),
+				WestTheme.era_name(scenario_calendar_year()),
+			])
+		_reset_seasonal_forage()
 	_roll_weather()
-	for coords in plots:
-		plots[coords].tended = false
-	_sync_hex_from_plots()
+	for zone_id in work_zones:
+		work_zones[zone_id].work = 0
+	refresh_labor()
 
 
-func _check_hunger_lose() -> void:
-	if resources["food"] < 0:
+func _reset_seasonal_forage() -> void:
+	if hex_sim == null:
+		return
+	for coords in hex_sim.hexes:
+		var hex = hex_sim.hexes[coords]
+		if hex.forage_mask != 0:
+			hex.forage_depleted = false
+
+
+func _check_family_vitality() -> void:
+	if game_lost:
+		return
+	var starving: bool = total_food() < living_count()
+	var thirsty: bool = resources.get("water", 0) < living_count()
+	var exposed: bool = season == Season.WINTER and (not has_shelter() or resources.get("firewood", 0) <= 0)
+	if starving or thirsty:
 		consecutive_hungry_days += 1
 		if not _batch_mode and consecutive_hungry_days == 1:
-			_log("The household goes hungry today.")
-		if consecutive_hungry_days >= HUNGRY_DAYS_TO_LOSE:
-			game_lost = true
-			last_game_over_reason = "The household starved after %d hungry days." % consecutive_hungry_days
-			_log(last_game_over_reason)
-			game_over.emit(last_game_over_reason)
+			_log("The family lacks provisions or water.")
 	else:
 		consecutive_hungry_days = 0
+	for person in persons:
+		if not person.alive:
+			continue
+		if starving or thirsty:
+			person.health -= 15
+		if exposed:
+			person.health -= 10
+		if person.health <= 0:
+			person.alive = false
+			person.health = 0
+			if not _batch_mode:
+				_log("%s has died." % person.display_name)
+	if _all_family_dead():
+		game_lost = true
+		last_game_over_reason = "The claim failed. The family did not survive the winter."
+		_log(last_game_over_reason)
+		game_over.emit(last_game_over_reason)
 
 
-func _consume_household_food_daily() -> void:
-	food_consumption_accumulator += HOUSEHOLD_FOOD_PER_DAY
-	var consumed := 0
+func _all_family_dead() -> bool:
+	for person in persons:
+		if person.alive:
+			return false
+	return true
+
+
+func _consume_household_daily() -> void:
+	var mouths := living_count()
+	food_consumption_accumulator += float(mouths) * FOOD_PER_PERSON_DAY
+	water_consumption_accumulator += float(mouths) * WATER_PER_PERSON_DAY
+	var food_consumed := 0
 	while food_consumption_accumulator >= 1.0 - 0.001:
-		resources["food"] -= 1
+		_spend_food_unit()
 		food_consumption_accumulator -= 1.0
-		consumed += 1
+		food_consumed += 1
+	while water_consumption_accumulator >= 1.0 - 0.001:
+		resources["water"] = resources.get("water", 0) - 1
+		water_consumption_accumulator -= 1.0
+	if season == Season.WINTER:
+		resources["firewood"] = resources.get("firewood", 0) - FIREWOOD_PER_WINTER_DAY * mouths
 	if _batch_mode:
-		_batch_stats["food_consumed"] += consumed
-		if resources["food"] < 0:
+		_batch_stats["food_consumed"] += food_consumed
+		if total_food() < 0:
 			_batch_stats["hungry_days"] += 1
 	resources_changed.emit()
 
 
-func _advance_crops() -> void:
-	for coords in plots:
-		var plot: PlotState = plots[coords]
-		if plot.is_empty():
+func _spend_food_unit() -> void:
+	for key in ["food", "berries", "roots", "mushrooms"]:
+		if resources.get(key, 0) > 0:
+			resources[key] -= 1
+			return
+	if resources.get("meat", 0) > 0:
+		resources["meat"] -= 1
+
+
+func _advance_fields() -> void:
+	for field_id in fields:
+		var field = fields[field_id]
+		if field.is_empty():
 			continue
-		var crop: CropDefinition = get_crop(plot.crop_id)
+		var crop := get_crop(field.crop_id)
 		if crop == null:
 			continue
-		if plot.is_mature(crop):
+		if field.is_mature(crop):
 			continue
 		if weather == Weather.FROST and not crop.frost_tolerant:
-			if plot.tended:
+			if field.tended:
 				if not _batch_mode:
 					_log("Frost hit %s but tending helped." % crop.display_name)
 			else:
-				plot.clear()
+				field.clear_crop()
 				if _batch_mode:
 					_batch_stats["crops_killed"] += 1
 				else:
-					_log("Frost killed the %s." % crop.display_name)
-				plot_changed.emit(coords)
+					_log("Frost killed the %s field." % crop.display_name)
 			continue
-		if weather == Weather.DROUGHT and not plot.tended:
+		if weather == Weather.DROUGHT and not field.tended:
 			if _batch_mode:
 				_batch_stats["drought_stalls"] += 1
-			elif not _batch_mode:
-				_log("Drought stalled the %s — tend it." % crop.display_name)
-			plot_changed.emit(coords)
 			continue
-		plot.growth_days += 1
+		field.growth_days += 1
 		if _batch_mode:
 			_batch_stats["growth_days"] += 1
-		elif weather == Weather.RAIN:
-			_log("Rain helped the %s grow." % crop.display_name)
-		plot_changed.emit(coords)
 
 
 func _roll_weather() -> void:
@@ -1226,10 +1679,10 @@ func _apply_cleared_woods() -> void:
 	if hex_sim == null:
 		return
 	for coords in cleared_woods:
-		var hex: HexState = hex_sim.get_hex(coords)
+		var hex = hex_sim.get_hex(coords)
 		if hex == null:
 			continue
-		hex.terrain = HexState.TERRAIN_GRASS
+		hex.terrain = HexStateRes.TERRAIN_GRASS
 		hex.forest = 0.0
 		hex_sim.mark_dirty(coords)
 

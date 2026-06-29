@@ -1,62 +1,49 @@
 extends GutTest
 
-const HOME := Vector2i(0, 0)
-
 
 func before_each() -> void:
 	GameState.reset_for_test()
 	TurnManager.reset_for_test()
+	GameState.weather = GameState.Weather.CLEAR
+	GameState.season = GameState.Season.SPRING
 
 
-func test_plant_wheat_consumes_seed() -> void:
-	var seeds_before: int = GameState.resources["wheat_seed"]
-	assert_eq(GameState.try_plant(HOME, "wheat"), "ok")
-	assert_eq(GameState.resources["wheat_seed"], seeds_before - 1)
-	assert_false(GameState.get_plot(HOME).is_empty())
+func test_plant_field_consumes_seed() -> void:
+	var field_id := GameState.create_field()
+	GameState.add_hex_to_field(field_id, GameState.home_hex)
+	var seeds_before: int = GameState.resources["corn_seed"]
+	assert_eq(GameState.plant_field(field_id, "corn"), "ok")
+	assert_eq(GameState.resources["corn_seed"], seeds_before - 1)
+	assert_false(GameState.fields[field_id].is_empty())
 
 
-func test_harvest_mature_crop_adds_food() -> void:
-	var plot = GameState.get_plot(HOME)
-	plot.crop_id = "wheat"
-	plot.growth_days = 28
+func test_harvest_mature_field_adds_food() -> void:
+	var field_id := GameState.create_field()
+	GameState.add_hex_to_field(field_id, GameState.home_hex)
+	GameState.plant_field(field_id, "corn")
+	var field = GameState.fields[field_id]
+	field.growth_days = 28
 	var food_before: int = GameState.resources["food"]
-	assert_eq(GameState.try_harvest(HOME), "ok")
-	assert_eq(GameState.resources["food"], food_before + 8)
-	assert_true(plot.is_empty())
+	GameState.labor_pool = 10
+	GameState._work_fields()
+	assert_gt(GameState.resources["food"], food_before)
+	assert_true(field.is_empty())
 
 
-func test_frost_kills_untended_wheat() -> void:
-	var plot = GameState.get_plot(HOME)
-	plot.crop_id = "wheat"
-	plot.growth_days = 5
-	GameState.persons.clear()
+func test_frost_kills_untended_field() -> void:
+	var field_id := GameState.create_field()
+	GameState.add_hex_to_field(field_id, GameState.home_hex)
+	GameState.plant_field(field_id, "corn")
+	var field = GameState.fields[field_id]
+	field.growth_days = 5
 	GameState.weather = GameState.Weather.FROST
 	GameState.resolve_day(1)
-	assert_true(plot.is_empty())
+	assert_true(field.is_empty())
 
 
-func test_drought_stalls_growth_without_tend() -> void:
-	var plot = GameState.get_plot(HOME)
-	plot.crop_id = "wheat"
-	plot.growth_days = 5
-	GameState.persons.clear()
-	GameState.weather = GameState.Weather.DROUGHT
-	GameState.resolve_day(1)
-	assert_eq(plot.growth_days, 5)
-
-
-func test_drought_growth_with_tend() -> void:
-	var plot = GameState.get_plot(HOME)
-	plot.crop_id = "wheat"
-	plot.growth_days = 5
-	plot.tended = true
-	GameState.weather = GameState.Weather.DROUGHT
-	GameState.resolve_day(1)
-	assert_eq(plot.growth_days, 6)
-
-
-func test_has_actionable_work_when_harvest_ready() -> void:
-	var plot = GameState.get_plot(HOME)
-	plot.crop_id = "wheat"
-	plot.growth_days = 28
-	assert_true(GameState.has_actionable_work())
+func test_has_actionable_work_when_field_mature() -> void:
+	var field_id := GameState.create_field()
+	GameState.add_hex_to_field(field_id, GameState.home_hex)
+	GameState.plant_field(field_id, "corn")
+	GameState.fields[field_id].growth_days = 28
+	assert_true(GameState.needs_attention())

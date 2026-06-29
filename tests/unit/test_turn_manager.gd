@@ -6,6 +6,7 @@ const HOME := Vector2i(0, 0)
 func before_each() -> void:
 	GameState.reset_for_test(42)
 	TurnManager.reset_for_test()
+	GameState.season = GameState.Season.SPRING
 
 
 func test_labor_pool_sums_household() -> void:
@@ -23,20 +24,26 @@ func test_advance_days_increments_turn_and_refreshes_labor() -> void:
 
 
 func test_advance_until_stops_when_work_exists() -> void:
-	var plot = GameState.get_plot(HOME)
-	plot.crop_id = "wheat"
-	plot.growth_days = 28
+	var field_id := GameState.create_field()
+	GameState.add_hex_to_field(field_id, GameState.home_hex)
+	GameState.plant_field(field_id, "corn")
+	GameState.fields[field_id].growth_days = 28
 	TurnManager.advance_until_actionable()
 	assert_eq(TurnManager.turn_number, 1)
 
 
 func test_advance_until_skips_idle_days() -> void:
-	var plot = GameState.get_plot(HOME)
-	plot.crop_id = "wheat"
-	plot.growth_days = 5
+	var field_id := GameState.create_field()
+	GameState.add_hex_to_field(field_id, GameState.home_hex)
+	GameState.plant_field(field_id, "corn")
+	GameState.fields[field_id].growth_days = 5
 	GameState.weather = GameState.Weather.CLEAR
-	GameState.resources["wheat_seed"] = 0
-	GameState.resources["barley_seed"] = 0
+	GameState.resources["corn_seed"] = 0
+	GameState.resources["bean_seed"] = 0
+	for coords in GameState.world_coords():
+		var hex = GameState.get_hex(coords)
+		if hex != null:
+			hex.forage_mask = 0
 	assert_false(GameState.has_actionable_work())
 	TurnManager.advance_until_actionable()
 	assert_gt(TurnManager.turn_number, 1)

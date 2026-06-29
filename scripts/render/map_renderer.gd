@@ -8,10 +8,11 @@ const ZOOM_ZONE := 0.07
 
 const HexGrid = preload("res://scripts/world/hex_grid.gd")
 const AggregateBucket = preload("res://scripts/world/aggregate_bucket.gd")
+const WestTheme = preload("res://scripts/theme/west_theme.gd")
 
 const TERRAIN_COLORS := {
-	0: Color(0.22, 0.45, 0.22, 0.85),
-	1: Color(0.45, 0.62, 0.28, 0.9),
+	0: WestTheme.COLOR_AGG_GRASS,
+	1: WestTheme.COLOR_AGG_FIELD,
 }
 
 var tile_map: TileMapLayer
@@ -68,5 +69,5 @@ func _draw() -> void:
 		var origin := Vector2(bucket.id.x * cell_size, bucket.id.y * cell_size)
 		var color: Color = TERRAIN_COLORS.get(bucket.terrain, TERRAIN_COLORS[0])
 		if bucket.plot_count > 0:
-			color = color.lerp(Color(0.9, 0.8, 0.2), 0.35)
+			color = color.lerp(WestTheme.COLOR_AGG_HIGHLIGHT, 0.35)
 		draw_rect(Rect2(origin, Vector2(cell_size, cell_size)), color)

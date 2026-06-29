@@ -2,14 +2,13 @@ extends RefCounted
 
 const BucketAssigner = preload("res://scripts/world/bucket_assigner.gd")
 const AggregateBucket = preload("res://scripts/world/aggregate_bucket.gd")
-const HexState = preload("res://scripts/world/hex_state.gd")
 
 var patches: Dictionary = {}
 var blocks: Dictionary = {}
 var zones: Dictionary = {}
 
 
-func mark_hex_dirty(hex: HexState) -> void:
+func mark_hex_dirty(hex) -> void:
 	_get_or_create(patches, hex.patch_id, 1).dirty = true
 	_get_or_create(blocks, hex.block_id, 2).dirty = true
 	_get_or_create(zones, hex.zone_id, 3).dirty = true
@@ -44,7 +43,7 @@ func _recompute_patch(key: String, hexes: Dictionary, plot_coords: Dictionary) -
 	patch.level = 1
 	var terrain_counts: Dictionary = {}
 	for coords in hexes:
-		var hex: HexState = hexes[coords]
+		var hex = hexes[coords]
 		if BucketAssigner.bucket_key(hex.patch_id) != key:
 			continue
 		patch.food += hex.food

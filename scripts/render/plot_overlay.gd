@@ -1,36 +1,17 @@
 extends Node2D
 
-const HexState = preload("res://scripts/world/hex_state.gd")
 const HexGrid = preload("res://scripts/world/hex_grid.gd")
-const FarmBuilding = preload("res://scripts/world/farm_building.gd")
-const PlotState = preload("res://scripts/farming/plot_state.gd")
-
-const COLOR_EMPTY := Color(0.58, 0.45, 0.28, 0.62)
-const COLOR_WHEAT := Color(0.72, 0.78, 0.32, 0.78)
-const COLOR_WHEAT_MATURE := Color(0.92, 0.76, 0.18, 0.88)
-const COLOR_BARLEY := Color(0.55, 0.72, 0.28, 0.78)
-const COLOR_BARLEY_MATURE := Color(0.85, 0.72, 0.22, 0.88)
-const COLOR_CLAIMABLE := Color(0.28, 0.62, 0.38, 0.45)
-const COLOR_WOOD := Color(0.12, 0.38, 0.16, 0.72)
-const COLOR_WOOD_CLEAR := Color(0.95, 0.55, 0.15, 0.9)
-const COLOR_GRASS := Color(0.35, 0.55, 0.28, 0.35)
-const COLOR_WATER := Color(0.15, 0.35, 0.62, 0.75)
-const COLOR_HOME := Color(0.45, 0.55, 0.85, 0.5)
-const COLOR_NEED_WORK := Color(0.95, 0.42, 0.12, 0.95)
-const COLOR_ORDER := Color(0.25, 0.85, 0.95, 0.95)
-const COLOR_TENDED := Color(0.35, 0.65, 0.95, 0.9)
-const COLOR_SELECT := Color(1.0, 0.95, 0.55, 1.0)
-const COLOR_HOUSE := Color(0.55, 0.38, 0.22, 0.95)
-const COLOR_BARN := Color(0.62, 0.28, 0.18, 0.92)
-const COLOR_ROOF := Color(0.45, 0.22, 0.12, 0.95)
+const WestTheme = preload("res://scripts/theme/west_theme.gd")
 
 var selected_hex: Vector2i = Vector2i(999999, 999999)
 var _hex_view: bool = true
 var _font: Font
+var _camera: Camera2D
 
 
-func setup(_map: TileMapLayer) -> void:
+func setup(_map: TileMapLayer, camera: Camera2D = null) -> void:
 	_font = ThemeDB.fallback_font
+	_camera = camera
 
 
 func set_hex_view(enabled: bool) -> void:
@@ -48,134 +29,99 @@ func refresh() -> void:
 	queue_redraw()
 
 
+func _visible_coords() -> Array[Vector2i]:
+	if _camera != null:
+		var vp := get_viewport_rect().size
+		var half := vp / (_camera.zoom * 2.0)
+		var center := _camera.get_screen_center_position()
+		return GameState.visible_coords(Rect2(center - half, half * 2.0))
+	return GameState.world_coords()
+
+
 func _draw() -> void:
-	if not _hex_view:
+	if not _hex_view or GameState.hex_sim == null:
 		return
-	for coords in GameState.world_coords():
-		if GameState.is_farm_plot(coords):
-			continue
-		_draw_wild_hex(coords)
-	for coords in GameState.plots:
-		_draw_farm_plot(coords)
-	for coords in GameState.buildings:
-		_draw_building(coords, GameState.buildings[coords])
-	for coords in GameState.orders:
-		_draw_order_marker(coords)
+	for coords in _visible_coords():
+		_draw_hex(coords)
+	for coords in GameState.structures:
+		_draw_structure(coords, GameState.structures[coords])
 	if selected_hex != Vector2i(999999, 999999):
 		_draw_selection(selected_hex)
 
 
-func _draw_wild_hex(coords: Vector2i) -> void:
-	var terrain := GameState.hex_terrain(coords)
-	if terrain == HexState.TERRAIN_WATER:
-		_draw_hex_fill(coords, COLOR_WATER)
+func _draw_hex(coords: Vector2i) -> void:
+	var hex: HexState = GameState.get_hex(coords)
+	if hex == null:
 		return
-	var work := GameState.plot_work_type(coords)
-	if terrain == HexState.TERRAIN_WOOD:
-		_draw_hex_fill(coords, COLOR_WOOD)
-		_draw_trees(coords)
-		_draw_label(coords, "WOOD", 11)
-		if work == "clear_wood":
-			_draw_hex_border(coords, COLOR_WOOD_CLEAR, 3.0, false)
-	elif work == "claim":
-		_draw_hex_fill(coords, COLOR_GRASS)
-		_draw_hex_border(coords, COLOR_CLAIMABLE.lightened(0.2), 2.0, true)
-		_draw_label(coords, "CLAIM", 11)
-	else:
-		_draw_hex_fill(coords, COLOR_GRASS.darkened(0.08))
-
-
-func _draw_farm_plot(coords: Vector2i) -> void:
-	var plot: PlotState = GameState.get_plot(coords)
-	if plot == null:
-		return
-	var work := GameState.plot_work_type(coords)
-	var fill := COLOR_EMPTY
-	var label := "empty"
-	if plot.is_empty():
-		if work == "plant":
-			label = "plant?"
-	else:
-		var crop = GameState.get_crop(plot.crop_id)
-		if plot.is_mature(crop):
-			fill = COLOR_WHEAT_MATURE if plot.crop_id == "wheat" else COLOR_BARLEY_MATURE
-			label = "HARVEST"
-		else:
-			var ratio := GameState.plot_growth_ratio(coords)
-			var base := COLOR_WHEAT if plot.crop_id == "wheat" else COLOR_BARLEY
-			var mature := COLOR_WHEAT_MATURE if plot.crop_id == "wheat" else COLOR_BARLEY_MATURE
-			fill = base.lerp(mature, ratio * 0.65)
-			var abbr := "W" if plot.crop_id == "wheat" else "B"
-			label = "%s %d/%d" % [abbr, plot.growth_days, crop.grow_days]
-	_draw_hex_fill(coords, fill)
-	_draw_growth_bar(coords, GameState.plot_growth_ratio(coords), plot.is_empty())
+	var elev_shade := clampf(0.5 - hex.elevation / 80.0, -0.25, 0.25)
+	var base := WestTheme.with_alpha(WestTheme.COLOR_GRASS.darkened(-elev_shade), 0.35)
+	if hex.is_water():
+		base = WestTheme.with_alpha(WestTheme.COLOR_WATER, 0.75)
+	elif hex.veg_class == HexState.VegClass.WOODLAND:
+		base = WestTheme.with_alpha(WestTheme.COLOR_WOOD, 0.72)
+	elif hex.field_id != "":
+		base = WestTheme.with_alpha(WestTheme.COLOR_FIELD, 0.62)
+	_draw_hex_fill(coords, base)
+	if hex.cliff_edges != 0:
+		_draw_cliff_edges(coords, hex.cliff_edges)
+	if hex.river_flow >= 0:
+		_draw_flow_arrow(coords, hex.river_flow)
+	if hex.has_forage():
+		_draw_forage_marker(coords, hex.forage_mask)
 	if coords == GameState.home_hex:
-		_draw_hex_border(coords, COLOR_HOME, 2.5, false)
-	if work == "harvest" or work == "tend" or work == "plant":
-		_draw_hex_border(coords, COLOR_NEED_WORK, 3.0, false)
-	if plot.tended and not plot.is_empty():
-		_draw_tended_marker(coords)
-	var label_size := 13 if work == "harvest" else 12
-	if not GameState.get_building(coords):
-		_draw_label(coords, label, label_size)
+		_draw_hex_border(coords, WestTheme.with_alpha(WestTheme.COLOR_HOME, 0.5), 2.5, false)
+	var zone_label := GameState.order_label(coords)
+	if not zone_label.is_empty():
+		_draw_hex_border(coords, WestTheme.with_alpha(WestTheme.COLOR_ZONE, 0.95), 2.5, true)
+		_draw_label(coords, zone_label, 10, Vector2(0, -18))
 
 
-func _draw_building(coords: Vector2i, building: FarmBuilding) -> void:
+func _draw_cliff_edges(coords: Vector2i, mask: int) -> void:
+	var points := _hex_points(coords)
+	for i in points.size():
+		if mask & (1 << i):
+			var a: Vector2 = points[i]
+			var b: Vector2 = points[(i + 1) % points.size()]
+			draw_line(a, b, WestTheme.with_alpha(WestTheme.COLOR_CLIFF, 0.95), 5.0)
+
+
+func _draw_flow_arrow(coords: Vector2i, direction: int) -> void:
 	var center := _hex_center(coords)
-	match building.kind:
-		FarmBuilding.Kind.HOUSE:
-			_draw_house(center)
-			_draw_label(coords, "HOUSE", 10, Vector2(0, 28))
-		FarmBuilding.Kind.BARN:
-			_draw_barn(center)
-			_draw_label(coords, "BARN", 10, Vector2(0, 30))
+	var neighbors := HexGrid.neighbors(coords)
+	if direction < 0 or direction >= neighbors.size():
+		return
+	var target := GameState.map_to_world(neighbors[direction])
+	var dir := (target - center).normalized()
+	draw_line(center, center + dir * 18.0, WestTheme.COLOR_RIVER, 2.0)
 
 
-func _draw_house(center: Vector2) -> void:
-	var w := 28.0
-	var h := 20.0
-	var base := Rect2(center.x - w * 0.5, center.y - h * 0.5 + 4, w, h)
-	draw_rect(base, COLOR_HOUSE)
-	var roof := PackedVector2Array([
-		Vector2(center.x, center.y - h * 0.5 - 6),
-		Vector2(center.x + w * 0.55, center.y - h * 0.5 + 6),
-		Vector2(center.x - w * 0.55, center.y - h * 0.5 + 6),
-	])
-	draw_colored_polygon(roof, COLOR_ROOF)
-
-
-func _draw_barn(center: Vector2) -> void:
-	var w := 34.0
-	var h := 22.0
-	draw_rect(Rect2(center.x - w * 0.5, center.y - h * 0.5 + 2, w, h), COLOR_BARN)
-	var roof := PackedVector2Array([
-		Vector2(center.x, center.y - h * 0.5 - 4),
-		Vector2(center.x + w * 0.6, center.y - h * 0.5 + 8),
-		Vector2(center.x - w * 0.6, center.y - h * 0.5 + 8),
-	])
-	draw_colored_polygon(roof, COLOR_ROOF.darkened(0.15))
-
-
-func _draw_trees(coords: Vector2i) -> void:
+func _draw_forage_marker(coords: Vector2i, mask: int) -> void:
 	var center := _hex_center(coords)
-	for offset in [Vector2(-14, -8), Vector2(10, 6), Vector2(-4, 14)]:
-		var p: Vector2 = center + offset
-		draw_circle(p + Vector2(0, 4), 7.0, Color(0.08, 0.22, 0.08, 0.9))
-		var top := PackedVector2Array([
-			p + Vector2(0, -10),
-			p + Vector2(7, 4),
-			p + Vector2(-7, 4),
-		])
-		draw_colored_polygon(top, Color(0.15, 0.42, 0.18, 0.95))
+	if mask & HexState.FORAGE_BERRIES:
+		draw_circle(center + Vector2(-10, -8), 4.0, WestTheme.with_alpha(WestTheme.COLOR_FORAGE, 0.9))
+	if mask & HexState.FORAGE_ROOTS:
+		draw_circle(center + Vector2(8, 6), 3.5, Color(0.7, 0.5, 0.25))
+	if mask & HexState.FORAGE_MUSHROOMS:
+		draw_circle(center + Vector2(0, 10), 3.5, Color(0.8, 0.3, 0.3))
 
 
-func _draw_order_marker(coords: Vector2i) -> void:
-	_draw_hex_border(coords, COLOR_ORDER, 2.5, true)
-	_draw_label(coords, "→ " + GameState.order_label(coords), 10, Vector2(0, -float(HexGrid.TILE_SIZE.y) * 0.22))
+func _draw_structure(coords: Vector2i, structure: Structure) -> void:
+	var center := _hex_center(coords)
+	match structure.kind:
+		Structure.Kind.SHELTER, Structure.Kind.HOUSE:
+			draw_rect(Rect2(center.x - 14, center.y - 8, 28, 18), WestTheme.with_alpha(WestTheme.COLOR_SHELTER, 0.95))
+			_draw_label(coords, structure.display_name, 9, Vector2(0, 24))
+		Structure.Kind.BARN, Structure.Kind.SHED:
+			draw_rect(Rect2(center.x - 16, center.y - 10, 32, 20), WestTheme.with_alpha(WestTheme.COLOR_BARN, 0.95))
+		Structure.Kind.TRAP:
+			draw_rect(Rect2(center.x - 8, center.y - 8, 16, 16), WestTheme.with_alpha(WestTheme.COLOR_TRAP, 0.95))
+			_draw_label(coords, "SNARE", 9)
+		Structure.Kind.WELL:
+			draw_circle(center, 8.0, WestTheme.with_alpha(WestTheme.COLOR_WELL, 0.95))
 
 
 func _draw_selection(coords: Vector2i) -> void:
-	_draw_hex_border(coords, COLOR_SELECT, 4.0, false)
+	_draw_hex_border(coords, WestTheme.COLOR_SELECT, 4.0, false)
 
 
 func _draw_hex_fill(coords: Vector2i, color: Color) -> void:
@@ -193,24 +139,6 @@ func _draw_hex_border(coords: Vector2i, color: Color, width: float, dashed: bool
 		draw_polyline(points, color, width)
 
 
-func _draw_growth_bar(coords: Vector2i, ratio: float, empty: bool) -> void:
-	if empty:
-		return
-	var center := _hex_center(coords)
-	var w := float(HexGrid.TILE_SIZE.x) * 0.55
-	var h := 6.0
-	var left := center.x - w * 0.5
-	var top := center.y + float(HexGrid.TILE_SIZE.y) * 0.18
-	draw_rect(Rect2(left, top, w, h), Color(0.1, 0.1, 0.1, 0.55))
-	draw_rect(Rect2(left, top, w * ratio, h), Color(0.25, 0.85, 0.35, 0.9))
-
-
-func _draw_tended_marker(coords: Vector2i) -> void:
-	var center := _hex_center(coords)
-	draw_circle(center + Vector2(-22, -18), 5.0, COLOR_TENDED)
-	draw_circle(center + Vector2(-22, -18), 5.0, Color(0.1, 0.2, 0.35, 0.8), false, 1.0)
-
-
 func _draw_label(coords: Vector2i, text: String, size: int, offset: Vector2 = Vector2.ZERO) -> void:
 	if _font == null or text.is_empty():
 		return
@@ -223,7 +151,7 @@ func _draw_label(coords: Vector2i, text: String, size: int, offset: Vector2 = Ve
 		HORIZONTAL_ALIGNMENT_LEFT,
 		-1,
 		size,
-		Color(0.92, 0.92, 0.88, 0.95)
+		WestTheme.COLOR_LABEL
 	)
 
 

@@ -27,7 +27,7 @@ func advance_until_actionable(max_days: int = 364) -> void:
 	if phase != Phase.PLAYER:
 		return
 	if not GameState.has_pending_orders() and GameState.needs_attention():
-		GameState.player_message("The farm needs you — queue some work.")
+		GameState.player_message("The claim needs work — queue a chore.")
 		return
 	GameState.begin_day_batch(max_days)
 	var days := 0
@@ -41,7 +41,7 @@ func advance_until_actionable(max_days: int = 364) -> void:
 	GameState._batch_stats["days"] = days
 	GameState.end_day_batch()
 	if GameState.needs_attention():
-		GameState.player_message("Stopped — the farm needs you.")
+		GameState.player_message("Stopped — the claim needs you.")
 	elif days >= max_days:
 		GameState.player_message("A full year passed with nothing pressing.")
 	_start_turn()

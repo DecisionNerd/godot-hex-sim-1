@@ -10,9 +10,9 @@ config_version=5
 
 [application]
 
-config/name="Hex Sim"
-config/description="Turn-based farming sim — head of a household on a hex map."
-config/tags=PackedStringArray("2d", "hex", "farming", "simulation", "turn-based")
+config/name="Valley Claim"
+config/description="Frontier survival across the American West, 1540–1890."
+config/tags=PackedStringArray("2d", "hex", "frontier", "homestead", "simulation", "turn-based")
 run/main_scene="res://scenes/start.tscn"
 config/features=PackedStringArray("4.7")
 config/icon="res://icon.webp"

@@ -14,7 +14,7 @@ func test_empty_plot_is_not_mature() -> void:
 
 func test_mature_when_growth_reaches_grow_days() -> void:
 	var plot := PlotState.new()
-	plot.crop_id = "wheat"
+	plot.crop_id = "corn"
 	plot.growth_days = 10
 	var crop := CropDefinition.new()
 	crop.grow_days = 10
@@ -23,7 +23,7 @@ func test_mature_when_growth_reaches_grow_days() -> void:
 
 func test_clear_resets_plot() -> void:
 	var plot := PlotState.new()
-	plot.crop_id = "wheat"
+	plot.crop_id = "corn"
 	plot.growth_days = 5
 	plot.tended = true
 	plot.clear()

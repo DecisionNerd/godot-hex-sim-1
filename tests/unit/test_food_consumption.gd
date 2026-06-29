@@ -6,16 +6,18 @@ func before_each() -> void:
 	TurnManager.reset_for_test()
 
 
-func test_seven_days_consumes_two_food() -> void:
-	var start_food: int = GameState.resources["food"]
+func test_seven_days_consumes_food_for_family() -> void:
+	var start_food: int = GameState.total_food()
+	var mouths := GameState.living_count()
 	for day in range(1, 8):
 		GameState.resolve_day(day)
-	assert_eq(GameState.resources["food"], start_food - 2)
+	assert_eq(GameState.total_food(), maxi(start_food - mouths * 7, 0))
 
 
 func test_daily_rate_uses_accumulator() -> void:
 	GameState.resources["food"] = 100
 	GameState.food_consumption_accumulator = 0.0
-	GameState.resolve_day(1)
-	assert_eq(GameState.resources["food"], 100)
-	assert_almost_eq(GameState.food_consumption_accumulator, GameState.HOUSEHOLD_FOOD_PER_DAY, 0.001)
+	var mouths := GameState.living_count()
+	GameState._consume_household_daily()
+	assert_eq(GameState.resources["food"], 100 - mouths)
+	assert_almost_eq(GameState.food_consumption_accumulator, 0.0, 0.001)

@@ -64,6 +64,19 @@ static func cells_in_radius(center: Vector2i, radius: int) -> Array[Vector2i]:
 	return out
 
 
+static func cells_in_rect(world_rect: Rect2, margin_hexes: int = 2) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var min_map := local_to_map(world_rect.position) - Vector2i(margin_hexes, margin_hexes)
+	var max_map := local_to_map(world_rect.end) + Vector2i(margin_hexes, margin_hexes)
+	for x in range(min_map.x, max_map.x + 1):
+		for y in range(min_map.y, max_map.y + 1):
+			var coords := Vector2i(x, y)
+			var center := map_to_local(coords)
+			if world_rect.grow(float(TILE_SIZE.x)).has_point(center):
+				out.append(coords)
+	return out
+
+
 static func neighbors(coords: Vector2i) -> Array[Vector2i]:
 	var axial := map_to_axial(coords)
 	var q := axial.x

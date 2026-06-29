@@ -1,7 +1,7 @@
 extends RefCounted
 
 const Person = preload("res://scripts/entities/person.gd")
-const PlotState = preload("res://scripts/farming/plot_state.gd")
+const Field = preload("res://scripts/farming/field.gd")
 
 
 func resolve_day(persons: Array, rng: RandomNumberGenerator, game_state: Object) -> void:
@@ -19,33 +19,32 @@ func resolve_day(persons: Array, rng: RandomNumberGenerator, game_state: Object)
 
 
 func _resolve_tend(person: Person, rng: RandomNumberGenerator, game_state: Object) -> void:
-	var candidates := _plots_needing_tend(game_state)
+	var candidates := _fields_needing_tend(game_state)
 	if candidates.is_empty():
 		return
-	var coords: Vector2i = candidates[rng.randi_range(0, candidates.size() - 1)]
-	_tend_plot(game_state, coords)
+	var field_id: String = candidates[rng.randi_range(0, candidates.size() - 1)]
+	_tend_field(game_state, field_id)
 	game_state.player_message("%s tended the crops." % person.display_name)
 
 
-func _plots_needing_tend(game_state: Object) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	for coords in game_state.plots:
-		var plot: PlotState = game_state.plots[coords]
-		if plot.is_empty():
+func _fields_needing_tend(game_state: Object) -> Array[String]:
+	var out: Array[String] = []
+	for field_id in game_state.fields:
+		var field: Field = game_state.fields[field_id]
+		if field.is_empty():
 			continue
-		var crop = game_state.get_crop(plot.crop_id)
-		if plot.tended or plot.is_mature(crop):
+		var crop = game_state.get_crop(field.crop_id)
+		if field.tended or field.is_mature(crop):
 			continue
 		if game_state.weather == game_state.Weather.DROUGHT:
-			out.append(coords)
+			out.append(field_id)
 		elif game_state.weather == game_state.Weather.FROST and not crop.frost_tolerant:
-			out.append(coords)
+			out.append(field_id)
 	return out
 
 
-func _tend_plot(game_state: Object, coords: Vector2i) -> void:
-	var plot: PlotState = game_state.get_plot(coords)
-	if plot == null or plot.is_empty():
+func _tend_field(game_state: Object, field_id: String) -> void:
+	var field: Field = game_state.fields.get(field_id)
+	if field == null or field.is_empty():
 		return
-	plot.tended = true
-	game_state.plot_changed.emit(coords)
+	field.tended = true

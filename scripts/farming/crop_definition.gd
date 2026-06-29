@@ -6,5 +6,5 @@ extends Resource
 @export var plant_seasons: Array[int] = []
 @export var grow_days: int = 28
 @export var yield_food: int = 5
-@export var seed_resource: String = "wheat_seed"
+@export var seed_resource: String = "corn_seed"
 @export var frost_tolerant: bool = false
