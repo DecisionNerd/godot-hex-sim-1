@@ -9,6 +9,9 @@ const Holding = preload("res://scripts/entities/holding.gd")
 const Agent = preload("res://scripts/entities/agent.gd")
 const PersonSystem = preload("res://scripts/systems/person_system.gd")
 const SaveManager = preload("res://scripts/autoload/save_manager.gd")
+const FarmBuilding = preload("res://scripts/world/farm_building.gd")
+const TerrainClassifier = preload("res://scripts/world/terrain_classifier.gd")
+const MapGenerator = preload("res://scripts/world/map_generator.gd")
 
 signal season_changed(season: int, year: int)
 signal weather_changed(weather: int)
@@ -27,6 +30,7 @@ const DAYS_PER_YEAR := DAYS_PER_SEASON * 4
 const HOUSEHOLD_FOOD_PER_DAY := 2.0 / 7.0
 const HUNGRY_DAYS_TO_LOSE := 7
 const CLAIM_PLOT_FOOD_COST := 2
+const CLEAR_WOOD_FOOD_COST := 3
 
 var rng := RandomNumberGenerator.new()
 var year: int = 1
@@ -43,6 +47,8 @@ var crops: Dictionary = {}
 var log_lines: PackedStringArray = []
 var home_hex: Vector2i = Vector2i.ZERO
 var hex_sim: HexSim
+var buildings: Dictionary = {}
+var cleared_woods: Array[Vector2i] = []
 var persons: Array = []
 var holdings: Array = []
 var agents: Array = []
@@ -51,7 +57,9 @@ var player_holding: Holding
 var game_active: bool = false
 var game_lost: bool = false
 var consecutive_hungry_days: int = 0
+var last_game_over_reason: String = ""
 var _map: TileMapLayer
+var _terrain_cells: Dictionary = {}
 var _batch_mode: bool = false
 var _batch_stats: Dictionary = {}
 var _pending_load: Dictionary = {}
@@ -76,13 +84,17 @@ func start_new_game(seed: int = -1) -> void:
 	}
 	plots.clear()
 	log_lines.clear()
+	buildings.clear()
+	cleared_woods.clear()
 	_batch_mode = false
 	_batch_stats = {}
 	home_hex = Vector2i.ZERO
 	game_lost = false
 	consecutive_hungry_days = 0
+	last_game_over_reason = ""
 	game_active = true
 	_pending_load = {}
+	_terrain_cells = {}
 	rng.seed = seed
 	if crops.is_empty():
 		_register_crops()
@@ -92,6 +104,15 @@ func start_new_game(seed: int = -1) -> void:
 
 func has_save() -> bool:
 	return SaveManager.exists()
+
+
+func can_continue() -> bool:
+	if not SaveManager.exists():
+		return false
+	var data := SaveManager.read()
+	if data.is_empty():
+		return false
+	return not bool(data.get("game_lost", false))
 
 
 func save_game() -> bool:
@@ -119,8 +140,12 @@ func save_game() -> bool:
 		"home_x": home_hex.x,
 		"home_y": home_hex.y,
 		"plots": plot_data,
+		"buildings": _serialize_buildings(),
+		"cleared_woods": _serialize_coords_list(cleared_woods),
 		"hungry_days": consecutive_hungry_days,
 		"game_lost": game_lost,
+		"game_over_reason": last_game_over_reason,
+		"actions_remaining": TurnManager.actions_remaining,
 		"log": Array(log_lines),
 	})
 
@@ -140,7 +165,8 @@ func apply_loaded_state() -> void:
 	var data := _pending_load
 	_pending_load = {}
 	rng.seed = int(data.get("seed", 12345))
-	TurnManager.reset_for_test(int(data.get("turn", 1)))
+	var saved_actions := int(data.get("actions_remaining", TurnManager.actions_per_turn))
+	TurnManager.reset_for_test(int(data.get("turn", 1)), saved_actions)
 	year = int(data.get("year", 1))
 	season = data.get("season", Season.SPRING) as Season
 	weather = data.get("weather", Weather.CLEAR) as Weather
@@ -149,6 +175,7 @@ func apply_loaded_state() -> void:
 	home_hex = Vector2i(int(data.get("home_x", 0)), int(data.get("home_y", 0)))
 	consecutive_hungry_days = int(data.get("hungry_days", 0))
 	game_lost = bool(data.get("game_lost", false))
+	last_game_over_reason = str(data.get("game_over_reason", ""))
 	log_lines = PackedStringArray()
 	for line in data.get("log", []):
 		log_lines.append(str(line))
@@ -161,6 +188,10 @@ func apply_loaded_state() -> void:
 		plot.tended = bool(entry.get("tended", false))
 		plots[coords] = plot
 	_setup_household()
+	_load_buildings_from_save(data.get("buildings", []))
+	cleared_woods.clear()
+	for entry in data.get("cleared_woods", []):
+		cleared_woods.append(Vector2i(int(entry["x"]), int(entry["y"])))
 	game_started.emit()
 
 
@@ -196,32 +227,30 @@ func end_day_batch() -> void:
 
 func init_plots_from_map(tile_map: TileMapLayer) -> void:
 	_map = tile_map
+	_generate_world_map(tile_map)
 	if not _pending_load.is_empty():
 		apply_loaded_state()
 		_rebuild_world_from_map(tile_map)
 		_sync_hex_from_plots()
 		game_started.emit()
 		return
+	# Autoload state survives scene changes — recover if a fresh start was requested
+	# but game_lost was left set (e.g. editor re-run, stale session).
+	if game_lost and not SceneRouter.entering_new_game:
+		start_new_game()
+		_generate_world_map(tile_map)
 	if plots.is_empty():
 		plots.clear()
-		var used: Array[Vector2i] = []
-		for coords in tile_map.get_used_cells():
-			used.append(coords)
-		if used.is_empty():
-			return
-		used.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
-			if a.x == b.x:
-				return a.y < b.y
-			return a.x < b.x
-		)
-		home_hex = used[used.size() >> 1]
+		home_hex = MapGenerator.pick_home_hex(_terrain_cells)
 		plots[home_hex] = PlotState.new()
 		var neighbors: Array[Vector2i] = tile_map.get_surrounding_cells(home_hex)
 		var added := 1
 		for coords in neighbors:
 			if added >= 8:
 				break
-			if tile_map.get_cell_source_id(coords) == -1:
+			if not _terrain_cells.has(coords):
+				continue
+			if _terrain_cells[coords] == HexState.TERRAIN_WATER:
 				continue
 			if plots.has(coords):
 				continue
@@ -233,6 +262,11 @@ func init_plots_from_map(tile_map: TileMapLayer) -> void:
 	_log("Spring day 1. Click a plot, assign labor, end the day. Family will help when they can.")
 	if game_active:
 		game_started.emit()
+
+
+func _generate_world_map(tile_map: TileMapLayer) -> void:
+	_terrain_cells = MapGenerator.generate_terrain(rng)
+	MapGenerator.apply_to_tile_map(tile_map, _terrain_cells)
 
 
 func _setup_household() -> void:
@@ -306,7 +340,9 @@ func _rebuild_world_from_map(tile_map: TileMapLayer) -> void:
 		plot_list.append(coords)
 	if player_holding != null:
 		player_holding.plot_coords = plot_list
-	hex_sim.build_from_map(tile_map, plot_list)
+	hex_sim.build_from_terrain(_terrain_cells, plot_list)
+	_apply_cleared_woods()
+	_place_starting_buildings()
 	_setup_neighbor_holding()
 
 
@@ -353,12 +389,15 @@ func reset_for_test(seed: int = 12345) -> void:
 	}
 	plots.clear()
 	log_lines.clear()
+	buildings.clear()
+	cleared_woods.clear()
 	_batch_mode = false
 	_batch_stats = {}
 	home_hex = Vector2i(0, 0)
 	plots[home_hex] = PlotState.new()
 	game_lost = false
 	consecutive_hungry_days = 0
+	last_game_over_reason = ""
 	rng.seed = seed
 	if crops.is_empty():
 		_register_crops()
@@ -396,20 +435,71 @@ func is_farm_plot(coords: Vector2i) -> bool:
 	return plots.has(coords)
 
 
+func get_building(coords: Vector2i) -> FarmBuilding:
+	return buildings.get(coords)
+
+
+func hex_terrain(coords: Vector2i) -> int:
+	if hex_sim == null:
+		return HexState.TERRAIN_GRASS
+	var hex: HexState = hex_sim.get_hex(coords)
+	if hex == null:
+		return HexState.TERRAIN_GRASS
+	return hex.terrain
+
+
+func is_adjacent_to_holding(coords: Vector2i) -> bool:
+	if _map == null:
+		return false
+	for owned in plots:
+		if coords in _map.get_surrounding_cells(owned):
+			return true
+	return false
+
+
 func can_claim_plot(coords: Vector2i) -> bool:
 	if plots.has(coords):
 		return false
-	if _map != null and _map.get_cell_source_id(coords) == -1:
+	if not _terrain_cells.has(coords):
 		return false
-	if hex_sim != null and hex_sim.get_hex(coords) == null:
+	if _terrain_cells[coords] == HexState.TERRAIN_WATER:
 		return false
-	for owned in plots:
-		var neighbors: Array[Vector2i] = _map.get_surrounding_cells(owned) if _map != null else []
-		if _map == null:
-			continue
-		if coords in neighbors:
-			return true
-	return false
+	if hex_sim == null or hex_sim.get_hex(coords) == null:
+		return false
+	if not is_adjacent_to_holding(coords):
+		return false
+	var terrain := hex_terrain(coords)
+	return terrain == HexState.TERRAIN_GRASS
+
+
+func can_clear_wood(coords: Vector2i) -> bool:
+	if plots.has(coords):
+		return false
+	if hex_terrain(coords) != HexState.TERRAIN_WOOD:
+		return false
+	return is_adjacent_to_holding(coords)
+
+
+func try_clear_wood(coords: Vector2i) -> String:
+	if game_lost:
+		return "Game over."
+	if not TurnManager.consume_action():
+		return "No labor left today."
+	if not can_clear_wood(coords):
+		return "Select woodland next to your holding."
+	if resources.get("food", 0) < CLEAR_WOOD_FOOD_COST:
+		return "Need %d food to clear woodland." % CLEAR_WOOD_FOOD_COST
+	resources["food"] -= CLEAR_WOOD_FOOD_COST
+	var hex: HexState = hex_sim.get_hex(coords)
+	if hex != null:
+		hex.terrain = HexState.TERRAIN_GRASS
+		hex.forest = 0.0
+		cleared_woods.append(coords)
+		hex_sim.mark_dirty(coords)
+		hex_sim.flush_aggregates()
+	resources_changed.emit()
+	_log("Cleared woodland (%d food)." % CLEAR_WOOD_FOOD_COST)
+	return "ok"
 
 
 func try_claim_plot(coords: Vector2i) -> String:
@@ -428,6 +518,7 @@ func try_claim_plot(coords: Vector2i) -> String:
 	var hex: HexState = hex_sim.get_hex(coords)
 	if hex != null:
 		hex.terrain = HexState.TERRAIN_FARMLAND
+		hex.forest = 0.0
 		hex.ownership = "player"
 		hex_sim.mark_dirty(coords)
 	hex_sim.flush_aggregates()
@@ -446,10 +537,14 @@ func get_crop(crop_id: String) -> CropDefinition:
 
 
 func family_summary() -> String:
+	if persons.size() < 2:
+		return "Family: —"
 	return "Family: %s, %s" % [persons[0].display_name, persons[1].display_name]
 
 
 func holdings_summary() -> String:
+	if player_holding == null:
+		return ""
 	var parts: PackedStringArray = []
 	for holding in holdings:
 		var count := plots.size() if holding.id == player_holding.id else 3
@@ -580,9 +675,39 @@ func _mark_plot_changed(coords: Vector2i) -> void:
 	_sync_hex_from_plots()
 
 
+func plot_work_type(coords: Vector2i) -> String:
+	if not is_farm_plot(coords):
+		if can_clear_wood(coords):
+			return "clear_wood"
+		return "claim" if can_claim_plot(coords) else "none"
+	var plot := get_plot(coords)
+	if plot == null:
+		return "none"
+	if plot.is_empty():
+		return "plant" if _can_plant_any_crop() else "none"
+	var crop: CropDefinition = get_crop(plot.crop_id)
+	if plot.is_mature(crop):
+		return "harvest"
+	if _needs_tend(plot, crop):
+		return "tend"
+	return "none"
+
+
+func plot_growth_ratio(coords: Vector2i) -> float:
+	var plot := get_plot(coords)
+	if plot == null or plot.is_empty():
+		return 0.0
+	var crop: CropDefinition = get_crop(plot.crop_id)
+	if crop == null or crop.grow_days <= 0:
+		return 0.0
+	return clampf(float(plot.growth_days) / float(crop.grow_days), 0.0, 1.0)
+
+
 func plot_status(coords: Vector2i) -> String:
 	var plot := get_plot(coords)
 	if plot == null:
+		if can_clear_wood(coords):
+			return "Woodland — clear for %d food + 1 labor, then claim." % CLEAR_WOOD_FOOD_COST
 		if can_claim_plot(coords):
 			return "Wild land — claim for %d food + 1 labor." % CLAIM_PLOT_FOOD_COST
 		return "Not a farm plot."
@@ -603,6 +728,10 @@ func has_actionable_work() -> bool:
 	for coords in plots:
 		if _plot_has_work(plots[coords]):
 			return true
+	if _map != null:
+		for coords in _map.get_used_cells():
+			if can_clear_wood(coords) or can_claim_plot(coords):
+				return true
 	return false
 
 
@@ -675,9 +804,9 @@ func _check_hunger_lose() -> void:
 			_log("The household goes hungry today.")
 		if consecutive_hungry_days >= HUNGRY_DAYS_TO_LOSE:
 			game_lost = true
-			var reason := "The household starved after %d hungry days." % consecutive_hungry_days
-			_log(reason)
-			game_over.emit(reason)
+			last_game_over_reason = "The household starved after %d hungry days." % consecutive_hungry_days
+			_log(last_game_over_reason)
+			game_over.emit(last_game_over_reason)
 	else:
 		consecutive_hungry_days = 0
 
@@ -767,3 +896,69 @@ func _roll_weather() -> void:
 			else:
 				weather = Weather.FROST
 	weather_changed.emit(weather)
+
+
+func _place_starting_buildings() -> void:
+	if not buildings.is_empty():
+		return
+	var house := FarmBuilding.new()
+	house.id = "farmhouse"
+	house.display_name = "Farmhouse"
+	house.kind = FarmBuilding.Kind.HOUSE
+	house.hex_coords = home_hex
+	buildings[home_hex] = house
+	for coords in plots:
+		if coords == home_hex:
+			continue
+		var barn := FarmBuilding.new()
+		barn.id = "barn"
+		barn.display_name = "Barn"
+		barn.kind = FarmBuilding.Kind.BARN
+		barn.hex_coords = coords
+		buildings[coords] = barn
+		break
+
+
+func _apply_cleared_woods() -> void:
+	if hex_sim == null:
+		return
+	for coords in cleared_woods:
+		var hex: HexState = hex_sim.get_hex(coords)
+		if hex == null:
+			continue
+		hex.terrain = HexState.TERRAIN_GRASS
+		hex.forest = 0.0
+		hex_sim.mark_dirty(coords)
+
+
+func _serialize_buildings() -> Array:
+	var out: Array = []
+	for coords in buildings:
+		var b: FarmBuilding = buildings[coords]
+		out.append({
+			"x": coords.x,
+			"y": coords.y,
+			"id": b.id,
+			"name": b.display_name,
+			"kind": b.kind,
+		})
+	return out
+
+
+func _serialize_coords_list(coords_list: Array[Vector2i]) -> Array:
+	var out: Array = []
+	for coords in coords_list:
+		out.append({"x": coords.x, "y": coords.y})
+	return out
+
+
+func _load_buildings_from_save(data: Array) -> void:
+	buildings.clear()
+	for entry in data:
+		var coords := Vector2i(int(entry["x"]), int(entry["y"]))
+		var b := FarmBuilding.new()
+		b.id = str(entry.get("id", ""))
+		b.display_name = str(entry.get("name", ""))
+		b.kind = int(entry.get("kind", FarmBuilding.Kind.HOUSE))
+		b.hex_coords = coords
+		buildings[coords] = b

@@ -81,7 +81,15 @@ func _start_turn() -> void:
 	turn_started.emit(turn_number)
 
 
-func reset_for_test(turn: int = 1) -> void:
+func reset_for_test(turn: int = 1, actions: int = -1) -> void:
 	turn_number = turn
 	phase = Phase.PLAYER
-	actions_remaining = actions_per_turn
+	actions_remaining = actions if actions >= 0 else actions_per_turn
+
+
+func begin_game_scene() -> void:
+	# Autoload turn state survives scene changes; always open the day with labor.
+	phase = Phase.PLAYER
+	if actions_remaining <= 0:
+		actions_remaining = actions_per_turn
+	turn_started.emit(turn_number)

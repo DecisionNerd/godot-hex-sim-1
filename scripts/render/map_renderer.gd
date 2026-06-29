@@ -6,6 +6,8 @@ const ZOOM_PATCH := 0.55
 const ZOOM_BLOCK := 0.2
 const ZOOM_ZONE := 0.07
 
+const HexGrid = preload("res://scripts/world/hex_grid.gd")
+
 const TERRAIN_COLORS := {
 	0: Color(0.22, 0.45, 0.22, 0.85),
 	1: Color(0.45, 0.62, 0.28, 0.9),
@@ -37,7 +39,7 @@ func _process(_delta: float) -> void:
 		render_level = next
 		queue_redraw()
 	if tile_map != null:
-		tile_map.visible = render_level == RenderLevel.HEX
+		tile_map.visible = false
 
 
 func _draw() -> void:
@@ -49,13 +51,13 @@ func _draw() -> void:
 	match render_level:
 		RenderLevel.PATCH:
 			store = cache.patches
-			cell_size = float(tile_map.tile_set.tile_size.x) * 10.0
+			cell_size = float(HexGrid.TILE_SIZE.x) * 10.0
 		RenderLevel.BLOCK:
 			store = cache.blocks
-			cell_size = float(tile_map.tile_set.tile_size.x) * 100.0
+			cell_size = float(HexGrid.TILE_SIZE.x) * 100.0
 		RenderLevel.ZONE:
 			store = cache.zones
-			cell_size = float(tile_map.tile_set.tile_size.x) * 1000.0
+			cell_size = float(HexGrid.TILE_SIZE.x) * 1000.0
 		_:
 			return
 	for key in store:
