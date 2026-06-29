@@ -3,6 +3,7 @@ extends RefCounted
 const BucketAssigner = preload("res://scripts/world/bucket_assigner.gd")
 const AggregateCache = preload("res://scripts/world/aggregate_cache.gd")
 const HexStateRes = preload("res://scripts/world/hex_state.gd")
+const HexTopology = preload("res://scripts/world/hex_topology.gd")
 
 var hexes: Dictionary = {}
 var aggregate: AggregateCache = AggregateCache.new()
@@ -83,6 +84,8 @@ func apply_work(coords: Vector2i, action: String, context: Dictionary = {}) -> D
 			result = _work_trap(hex, context)
 		"chop_firewood":
 			result = _work_firewood(hex)
+		"build":
+			result = _work_build(hex)
 		_:
 			result = {"ok": false, "reason": "Unknown action."}
 	if result.get("ok", false):
@@ -129,8 +132,19 @@ func _work_water(hex) -> Dictionary:
 
 func _work_trap(hex, _context: Dictionary) -> Dictionary:
 	if hex.structure_id != "trap":
-		return {"ok": false, "reason": "No trap here."}
+		hex.structure_id = "trap"
+		return {"ok": true, "built_trap": true}
 	return {"ok": true, "meat": randi_range(0, 2)}
+
+
+func _work_build(hex) -> Dictionary:
+	if hex.is_water():
+		return {"ok": false, "reason": "Cannot build on water."}
+	if not HexTopology.is_settleable(hex):
+		return {"ok": false, "reason": "Ground too steep to build."}
+	if hex.structure_id != "":
+		return {"ok": false, "reason": "Structure already here."}
+	return {"ok": true}
 
 
 func _work_firewood(hex) -> Dictionary:

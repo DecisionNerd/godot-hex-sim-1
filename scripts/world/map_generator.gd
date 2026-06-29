@@ -69,8 +69,26 @@ static func generate_world(rng: RandomNumberGenerator) -> Dictionary:
 
 	HexTopology.apply(hexes)
 	HexHydrology.apply(hexes)
+	_apply_springs(hexes, rng)
 	_apply_lore_tags(hexes, rng)
 	return hexes
+
+
+static func _apply_springs(hexes: Dictionary, rng: RandomNumberGenerator) -> void:
+	var candidates: Array[Vector2i] = []
+	for coords in hexes:
+		var hex: HexStateRes = hexes[coords]
+		if hex.is_water() or hex.is_riparian or hex.is_spring:
+			continue
+		if hex.moisture < 0.1:
+			continue
+		if not HexTopology.is_settleable(hex):
+			continue
+		candidates.append(coords)
+	candidates.shuffle()
+	var target := mini(maxi(3, candidates.size() / 150), 6)
+	for i in range(mini(target, candidates.size())):
+		hexes[candidates[i]].is_spring = true
 
 
 static func _apply_lore_tags(hexes: Dictionary, rng: RandomNumberGenerator) -> void:

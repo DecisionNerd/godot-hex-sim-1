@@ -37,4 +37,13 @@ static func _homestead_1863():
 		"Summer 1863. The claim is staked in a valley where Spanish trails, "
 		+ "hunting grounds, and wagon ruts meet — stock the dugout before winter closes the pass."
 	)
+	scenario.prove_up_years = 5
+	scenario.required_field_hexes = 6
+	scenario.requires_dwelling = true
+	scenario.objective_text = (
+		"Prove up the homestead: reside five years, raise a cabin, and bring six field hexes to harvest."
+	)
+	scenario.victory_log = (
+		"The claim is proved. Five years of residence, a cabin standing, and cultivated acres filed at the land office."
+	)
 	return scenario

@@ -38,3 +38,14 @@ func test_topology_marks_cliffs() -> void:
 		if hexes[coords].cliff_edges != 0:
 			cliff_count += 1
 	assert_gt(cliff_count, 0, "map should contain cliff edges")
+
+
+func test_generate_world_includes_springs() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var hexes := MapGenerator.generate_world(rng)
+	var spring_count := 0
+	for coords in hexes:
+		if hexes[coords].is_spring:
+			spring_count += 1
+	assert_gte(spring_count, 3, "map should include inland springs")

@@ -11,6 +11,11 @@ const WestTheme = preload("res://scripts/theme/west_theme.gd")
 @export_multiline var opening_log: String = ""
 @export_multiline var menu_blurb: String = ""
 @export var settlement_title: String = "Choose your claim"
+@export var prove_up_years: int = 5
+@export var required_field_hexes: int = 6
+@export var requires_dwelling: bool = true
+@export_multiline var objective_text: String = ""
+@export_multiline var victory_log: String = ""
 
 
 func calendar_year(claim_year: int) -> int:

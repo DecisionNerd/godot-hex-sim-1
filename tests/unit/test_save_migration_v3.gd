@@ -24,3 +24,15 @@ func test_migrate_v2_save_renames_seeds_and_crops() -> void:
 	assert_eq(fields[0].get("crop_id"), "corn")
 	var zones: Array = migrated.get("work_zones", [])
 	assert_eq(zones[0].get("crop_id"), "beans")
+
+
+func test_migrate_v3_save_adds_prove_up_defaults() -> void:
+	var data := {
+		"version": 3,
+		"resources": {"food": 5},
+		"game_lost": false,
+	}
+	var migrated: Dictionary = GameState._migrate_loaded_data(data)
+	assert_eq(int(migrated.get("version", 0)), GameState.SAVE_VERSION)
+	assert_false(bool(migrated.get("game_won", true)))
+	assert_eq(migrated.get("proved_hexes", null), [])

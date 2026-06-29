@@ -2,6 +2,8 @@ extends Node2D
 
 const HexGrid = preload("res://scripts/world/hex_grid.gd")
 const TerrainLayout = preload("res://scripts/render/terrain_layout.gd")
+const Trader = preload("res://scripts/systems/trader.gd")
+const WestTheme = preload("res://scripts/theme/west_theme.gd")
 
 enum ViewMode { MAP, TERRAIN }
 
@@ -36,7 +38,20 @@ enum ViewMode { MAP, TERRAIN }
 @onready var claim_btn: Button = $UI/PlotPanel/Margin/VBox/ActionsRow2/ClaimBtn
 @onready var clear_wood_btn: Button = $UI/PlotPanel/Margin/VBox/ActionsRow2/ClearWoodBtn
 @onready var cancel_btn: Button = $UI/PlotPanel/Margin/VBox/ActionsRow2/CancelBtn
+@onready var plant_corn_btn: Button = $UI/PlotPanel/Margin/VBox/ActionsRow3/PlantCornBtn
+@onready var plant_beans_btn: Button = $UI/PlotPanel/Margin/VBox/ActionsRow3/PlantBeansBtn
+@onready var prove_up_btn: Button = $UI/PlotPanel/Margin/VBox/ActionsRow3/ProveUpBtn
+@onready var trade_select: OptionButton = $UI/PlotPanel/Margin/VBox/TradeRow/TradeSelect
+@onready var trade_buy_btn: Button = $UI/PlotPanel/Margin/VBox/TradeRow/TradeBuyBtn
+@onready var trade_sell_btn: Button = $UI/PlotPanel/Margin/VBox/TradeRow/TradeSellBtn
+@onready var trade_price_label: Label = $UI/PlotPanel/Margin/VBox/TradeRow/TradePriceLabel
 @onready var game_over_panel: PanelContainer = $UI/GameOverPanel
+@onready var game_over_title_label: Label = $UI/GameOverPanel/Margin/VBox/TitleLabel
+
+const TRADE_COMMODITIES: Array[String] = [
+	"food", "water", "firewood", "wood", "berries", "roots", "mushrooms", "meat",
+	"corn_seed", "bean_seed", "tools",
+]
 
 var selected_hex: Vector2i = Vector2i.ZERO
 var selected_hexes: Array[Vector2i] = []
@@ -66,6 +81,7 @@ var map_rotation_deg := 0.0
 func _ready() -> void:
 	_connect_signals()
 	_connect_buttons()
+	_setup_trade_select()
 	GameState.init_plots_from_map(tile_map)
 	TurnManager.begin_game_scene()
 	SceneRouter.entering_new_game = false
@@ -92,7 +108,7 @@ func _setup_selection_marquee() -> void:
 
 
 func _process(delta: float) -> void:
-	if GameState.game_lost:
+	if GameState.game_lost or GameState.game_won:
 		return
 	var pan := Input.get_vector(&"move_left", &"move_right", &"move_up", &"move_down")
 	if pan != Vector2.ZERO:
@@ -117,6 +133,8 @@ func _disconnect_signals() -> void:
 		GameState.resources_changed.disconnect(_request_ui_update)
 	if GameState.game_over.is_connected(_on_game_over):
 		GameState.game_over.disconnect(_on_game_over)
+	if GameState.victory_achieved.is_connected(_on_game_won):
+		GameState.victory_achieved.disconnect(_on_game_won)
 	if GameState.log_added.is_connected(_on_log_added):
 		GameState.log_added.disconnect(_on_log_added)
 	if GameState.season_changed.is_connected(_on_season_changed):
@@ -136,6 +154,8 @@ func _connect_signals() -> void:
 		GameState.resources_changed.connect(_request_ui_update)
 	if not GameState.game_over.is_connected(_on_game_over):
 		GameState.game_over.connect(_on_game_over)
+	if not GameState.victory_achieved.is_connected(_on_game_won):
+		GameState.victory_achieved.connect(_on_game_won)
 	if not GameState.log_added.is_connected(_on_log_added):
 		GameState.log_added.connect(_on_log_added)
 	if not GameState.season_changed.is_connected(_on_season_changed):
@@ -156,6 +176,13 @@ func _connect_buttons() -> void:
 	_connect_btn(claim_btn, _on_claim)
 	_connect_btn(clear_wood_btn, _on_clear_wood)
 	_connect_btn(cancel_btn, _on_cancel_order)
+	_connect_btn(plant_corn_btn, _on_plant_corn)
+	_connect_btn(plant_beans_btn, _on_plant_beans)
+	_connect_btn(prove_up_btn, _on_prove_up)
+	_connect_btn(trade_buy_btn, _on_trade_buy)
+	_connect_btn(trade_sell_btn, _on_trade_sell)
+	if not trade_select.item_selected.is_connected(_on_trade_item_selected):
+		trade_select.item_selected.connect(_on_trade_item_selected)
 	_connect_btn(work_day_btn, _on_work_day)
 	_connect_btn(end_day_btn, _on_end_day)
 	_connect_btn(skip_week_btn, _on_skip_week)
@@ -164,6 +191,47 @@ func _connect_buttons() -> void:
 	_connect_btn(menu_btn, _on_menu)
 	_connect_btn(view_toggle_btn, _on_toggle_view)
 	_connect_btn($UI/GameOverPanel/Margin/VBox/MenuBtn, _on_menu)
+
+
+func _setup_trade_select() -> void:
+	trade_select.clear()
+	for commodity in TRADE_COMMODITIES:
+		trade_select.add_item(WestTheme.resource_name(commodity))
+		trade_select.set_item_metadata(trade_select.item_count - 1, commodity)
+	_on_trade_item_selected(0)
+
+
+func _selected_trade_commodity() -> String:
+	var idx := trade_select.selected
+	if idx < 0 or idx >= TRADE_COMMODITIES.size():
+		return "food"
+	return str(trade_select.get_item_metadata(idx))
+
+
+func _on_trade_item_selected(_index: int) -> void:
+	var commodity := _selected_trade_commodity()
+	trade_price_label.text = "Buy $%d · Sell $%d" % [
+		Trader.buy_price(commodity),
+		Trader.sell_price(commodity),
+	]
+
+
+func _on_trade_buy() -> void:
+	var commodity := _selected_trade_commodity()
+	if GameState.buy_resource(commodity):
+		hint_label.text = "Bought %s at the general store." % commodity.replace("_", " ")
+	else:
+		hint_label.text = "Cannot buy %s." % commodity.replace("_", " ")
+	_request_ui_update()
+
+
+func _on_trade_sell() -> void:
+	var commodity := _selected_trade_commodity()
+	if GameState.sell_resource(commodity):
+		hint_label.text = "Sold %s at the general store." % commodity.replace("_", " ")
+	else:
+		hint_label.text = "Cannot sell %s." % commodity.replace("_", " ")
+	_request_ui_update()
 
 
 func _connect_btn(button: BaseButton, callable: Callable) -> void:
@@ -192,10 +260,19 @@ func _on_log_added(_message: String) -> void:
 
 
 func _refresh_game_over_ui() -> void:
-	if GameState.game_lost:
+	if GameState.game_won:
 		game_over_panel.visible = true
 		game_over_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-		var reason := GameState.last_game_over_reason
+		game_over_title_label.text = "Claim proved up"
+		var reason: String = GameState.last_victory_reason
+		if reason.is_empty():
+			reason = "The homestead claim is proved."
+		$UI/GameOverPanel/Margin/VBox/ReasonLabel.text = reason
+	elif GameState.game_lost:
+		game_over_panel.visible = true
+		game_over_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+		game_over_title_label.text = "Game over"
+		var reason: String = GameState.last_game_over_reason
 		if reason.is_empty():
 			reason = "The claim failed. The family did not survive the winter."
 		$UI/GameOverPanel/Margin/VBox/ReasonLabel.text = reason
@@ -205,7 +282,7 @@ func _refresh_game_over_ui() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if GameState.game_lost:
+	if GameState.game_lost or GameState.game_won:
 		return
 	if event.is_action_pressed(&"advance_until_work"):
 		_on_advance_until_work()
@@ -231,17 +308,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_toggle_view_mode()
 				get_viewport().set_input_as_handled()
 			KEY_B:
-				if GameState.buy_resource("food"):
-					hint_label.text = "Bought provisions at the general store."
+				_on_trade_buy()
 				get_viewport().set_input_as_handled()
 			KEY_N:
-				if GameState.sell_resource("food"):
-					hint_label.text = "Sold provisions at the general store."
+				_on_trade_sell()
 				get_viewport().set_input_as_handled()
 
 
 func _input(event: InputEvent) -> void:
-	if GameState.game_lost:
+	if GameState.game_lost or GameState.game_won:
 		return
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
@@ -494,7 +569,23 @@ func _on_harvest() -> void:
 
 
 func _on_claim() -> void:
-	_assign("build_shelter")
+	_assign("build_cabin")
+
+
+func _on_plant_corn() -> void:
+	_assign("plant", "corn")
+
+
+func _on_plant_beans() -> void:
+	_assign("plant", "beans")
+
+
+func _on_prove_up() -> void:
+	if GameState.prove_up():
+		_refresh_game_over_ui()
+		_request_ui_update(true)
+	else:
+		hint_label.text = "Claim not ready to prove up yet."
 
 
 func _on_clear_wood() -> void:
@@ -569,6 +660,12 @@ func _on_game_over(reason: String) -> void:
 	_request_ui_update(true)
 
 
+func _on_game_won(reason: String) -> void:
+	GameState.last_victory_reason = reason
+	_refresh_game_over_ui()
+	_request_ui_update(true)
+
+
 func _on_turn_started(_turn_number: int) -> void:
 	_request_ui_update()
 
@@ -582,8 +679,10 @@ func _refresh_world_view() -> void:
 
 
 func _default_hint() -> String:
-	if GameState.game_lost:
+	if GameState.game_lost or GameState.game_won:
 		return ""
+	if GameState.can_prove_up():
+		return "Requirements met — file proof with Prove up claim."
 	if view_mode == ViewMode.TERRAIN:
 		if GameState.has_pending_orders():
 			if GameState.labor_pool > 0:
@@ -636,7 +735,7 @@ func _update_ui(refresh_overlay: bool = false) -> void:
 	else:
 		plot_title_label.text = "Claim hex (%d, %d)" % [selected_hex.x, selected_hex.y]
 	plot_label.text = _plot_label_text()
-	actions_label.text = "Labor today %d / %d · Chores: %d" % [
+	actions_label.text = GameState.objective_summary() + " · Labor %d/%d · Chores: %d" % [
 		GameState.labor_pool,
 		GameState.labor_per_day,
 		GameState.order_count(),
@@ -652,14 +751,17 @@ func _update_ui(refresh_overlay: bool = false) -> void:
 		plot_overlay.refresh()
 		terrain_view.refresh()
 	_update_log()
-	var live := not GameState.game_lost
+	var live: bool = not GameState.game_lost and not GameState.game_won
 	plant_wheat_btn.text = "Gather chore"
 	plant_barley_btn.text = "Clear brush"
 	tend_btn.text = "Haul water"
 	harvest_btn.text = "Set snares"
-	claim_btn.text = "Raise dugout"
+	claim_btn.text = "Build cabin"
 	clear_wood_btn.text = "Field / chop fuelwood"
 	cancel_btn.text = "Remove chore"
+	plant_corn_btn.text = "Plant corn"
+	plant_beans_btn.text = "Plant beans"
+	prove_up_btn.text = "Prove up claim"
 	plant_wheat_btn.disabled = not live
 	plant_barley_btn.disabled = not live
 	tend_btn.disabled = not live
@@ -667,10 +769,16 @@ func _update_ui(refresh_overlay: bool = false) -> void:
 	claim_btn.disabled = not live
 	clear_wood_btn.disabled = not live
 	cancel_btn.disabled = not live or not _selection_has_order()
+	plant_corn_btn.disabled = not live or not _can_plant_field()
+	plant_beans_btn.disabled = not live or not _can_plant_field()
+	prove_up_btn.disabled = not live or not GameState.can_prove_up()
+	trade_buy_btn.disabled = not live
+	trade_sell_btn.disabled = not live
 	work_day_btn.disabled = not live or not GameState.has_pending_orders() or GameState.labor_pool <= 0
-	end_day_btn.disabled = GameState.game_lost
-	skip_week_btn.disabled = GameState.game_lost
-	skip_to_work_btn.disabled = GameState.game_lost
+	end_day_btn.disabled = GameState.game_lost or GameState.game_won
+	skip_week_btn.disabled = GameState.game_lost or GameState.game_won
+	skip_to_work_btn.disabled = GameState.game_lost or GameState.game_won
+	_on_trade_item_selected(trade_select.selected)
 
 
 func _zoom_label_text() -> String:
@@ -693,5 +801,15 @@ func _plot_label_text() -> String:
 			var crop = GameState.get_crop(field.crop_id)
 			var crop_name: String = crop.display_name if crop != null else field.crop_id
 			text += "\nField crop: %s (%d days)" % [crop_name, field.growth_days]
-	text += "\nGeneral store: B=buy provisions · N=sell provisions"
+	text += "\nGeneral store: choose commodity below · B=buy · N=sell"
 	return text
+
+
+func _can_plant_field() -> bool:
+	if selected_hexes.is_empty():
+		return false
+	var field_id: String = GameState.ensure_active_field()
+	if not GameState.fields.has(field_id):
+		return false
+	var field = GameState.fields[field_id]
+	return field.hexes.size() > 0 and field.is_empty()

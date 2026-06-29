@@ -29,6 +29,7 @@ signal plot_changed(coords: Vector2i)
 signal log_added(message: String)
 signal day_batch_finished(days: int)
 signal game_over(reason: String)
+signal victory_achieved(reason: String)
 signal game_started()
 
 enum Season { SPRING, SUMMER, AUTUMN, WINTER }
@@ -40,7 +41,7 @@ const FOOD_PER_PERSON_DAY := 1
 const WATER_PER_PERSON_DAY := 1
 const FIREWOOD_PER_WINTER_DAY := 1
 const HUNGRY_DAYS_TO_LOSE := 7
-const SAVE_VERSION := 3
+const SAVE_VERSION := 4
 
 const LABOR_HEAD := 10
 const SPOUSE_LABOR := 10
@@ -110,8 +111,11 @@ var person_system: PersonSystem = PersonSystem.new()
 var player_holding: Holding
 var game_active: bool = false
 var game_lost: bool = false
+var game_won: bool = false
 var consecutive_hungry_days: int = 0
 var last_game_over_reason: String = ""
+var last_victory_reason: String = ""
+var proved_hexes: Dictionary = {}
 var _map: TileMapLayer
 var _world_generated: bool = false
 var _batch_mode: bool = false
@@ -166,8 +170,11 @@ func start_new_game(seed: int = -1) -> void:
 	settlement_chosen = false
 	_world_generated = false
 	game_lost = false
+	game_won = false
 	consecutive_hungry_days = 0
 	last_game_over_reason = ""
+	last_victory_reason = ""
+	proved_hexes.clear()
 	game_active = true
 	_pending_load = {}
 	active_scenario = ScenarioCatalog.get_default()
@@ -210,7 +217,7 @@ func can_continue() -> bool:
 	var data := SaveManager.read()
 	if data.is_empty():
 		return false
-	return not bool(data.get("game_lost", false))
+	return not bool(data.get("game_lost", false)) and not bool(data.get("game_won", false))
 
 
 func save_game() -> bool:
@@ -239,7 +246,10 @@ func save_game() -> bool:
 		"active_zone_id": active_zone_id,
 		"hungry_days": consecutive_hungry_days,
 		"game_lost": game_lost,
+		"game_won": game_won,
 		"game_over_reason": last_game_over_reason,
+		"victory_reason": last_victory_reason,
+		"proved_hexes": Array(proved_hexes.keys()),
 		"labor_pool": labor_pool,
 		"labor_per_day": labor_per_day,
 		"log": Array(log_lines),
@@ -307,7 +317,12 @@ func apply_loaded_state() -> void:
 	settlement_chosen = bool(data.get("settlement_chosen", true))
 	consecutive_hungry_days = int(data.get("hungry_days", 0))
 	game_lost = bool(data.get("game_lost", false))
+	game_won = bool(data.get("game_won", false))
 	last_game_over_reason = str(data.get("game_over_reason", ""))
+	last_victory_reason = str(data.get("victory_reason", ""))
+	proved_hexes.clear()
+	for key in data.get("proved_hexes", []):
+		proved_hexes[str(key)] = true
 	log_lines = PackedStringArray()
 	for line in data.get("log", []):
 		log_lines.append(str(line))
@@ -759,6 +774,11 @@ func _migrate_loaded_data(data: Dictionary) -> Dictionary:
 			entry["crop_id"] = WestTheme.normalize_crop_id(str(entry.get("crop_id", "")))
 		zones_data[i] = entry
 	data["version"] = SAVE_VERSION
+	if version < 4:
+		data["game_won"] = bool(data.get("game_won", false))
+		data["victory_reason"] = str(data.get("victory_reason", ""))
+		if not data.has("proved_hexes"):
+			data["proved_hexes"] = []
 	return data
 
 
@@ -841,6 +861,8 @@ func zone_label(zone) -> String:
 		WorkZoneRes.ZoneType.BUILD:
 			if zone.structure_kind == "shelter":
 				return "raise dugout"
+			if zone.structure_kind == "house":
+				return "build cabin"
 			return "raise %s" % zone.structure_kind
 	return "work"
 
@@ -850,7 +872,7 @@ func has_pending_orders() -> bool:
 
 
 func work_today() -> void:
-	if _worked_today:
+	if _worked_today or game_lost or game_won:
 		return
 	_worked_today = true
 	_work_zones()
@@ -920,7 +942,12 @@ func _advance_zone_hex(zone, coords: Vector2i) -> void:
 		_apply_work_yields(result)
 		if action == "build":
 			_do_build(coords, zone.structure_kind)
-		_log("Worked %s at (%d,%d)." % [zone_label(zone), coords.x, coords.y])
+		if result.get("built_trap", false):
+			_log("Set a snare at (%d,%d)." % [coords.x, coords.y])
+		elif action == "trap":
+			_log("Checked snares at (%d,%d)." % [coords.x, coords.y])
+		else:
+			_log("Worked %s at (%d,%d)." % [zone_label(zone), coords.x, coords.y])
 	plot_changed.emit(coords)
 	resources_changed.emit()
 
@@ -949,7 +976,10 @@ func _do_build(coords: Vector2i, kind_name: String) -> void:
 	var s = StructureRes.new()
 	s.kind = kind
 	s.coords = coords
-	s.display_name = kind_name.capitalize()
+	match kind_name:
+		"house": s.display_name = "Cabin"
+		"trap": s.display_name = "Snare"
+		_: s.display_name = kind_name.capitalize()
 	structures[coords] = s
 	var hex = get_hex(coords)
 	if hex != null:
@@ -980,6 +1010,73 @@ func has_shelter() -> bool:
 		if s.kind == StructureRes.Kind.SHELTER or s.kind == StructureRes.Kind.HOUSE:
 			return true
 	return false
+
+
+func has_cabin() -> bool:
+	for coords in structures:
+		var s = structures[coords]
+		if s.kind == StructureRes.Kind.HOUSE:
+			return true
+	return false
+
+
+func _prove_up_requirements() -> Dictionary:
+	var scenario = active_scenario if active_scenario != null else ScenarioCatalog.get_default()
+	return {
+		"years": int(scenario.prove_up_years),
+		"field_hexes": int(scenario.required_field_hexes),
+		"requires_dwelling": bool(scenario.requires_dwelling),
+	}
+
+
+func prove_up_status() -> Dictionary:
+	var req := _prove_up_requirements()
+	var dwelling_done := has_cabin() if req["requires_dwelling"] else true
+	var cultivated := proved_hexes.size()
+	var ready: bool = (
+		not game_lost
+		and not game_won
+		and year >= req["years"]
+		and dwelling_done
+		and cultivated >= req["field_hexes"]
+	)
+	return {
+		"residence_years": year,
+		"required_years": req["years"],
+		"dwelling_done": dwelling_done,
+		"cultivated_count": cultivated,
+		"required_acres": req["field_hexes"],
+		"ready": ready,
+	}
+
+
+func objective_summary() -> String:
+	var status := prove_up_status()
+	var cabin_text := "cabin: yes" if status["dwelling_done"] else "cabin: no"
+	return "Prove up: %d/%d yrs · %s · %d/%d acres" % [
+		status["residence_years"],
+		status["required_years"],
+		cabin_text,
+		status["cultivated_count"],
+		status["required_acres"],
+	]
+
+
+func can_prove_up() -> bool:
+	return prove_up_status().get("ready", false)
+
+
+func prove_up() -> bool:
+	if not can_prove_up():
+		return false
+	game_won = true
+	var scenario = active_scenario if active_scenario != null else ScenarioCatalog.get_default()
+	last_victory_reason = scenario.victory_log
+	if last_victory_reason.is_empty():
+		last_victory_reason = "The homestead claim is proved."
+	_log(last_victory_reason)
+	victory_achieved.emit(last_victory_reason)
+	return true
 
 
 # --- Fields --------------------------------------------------------------
@@ -1076,6 +1173,8 @@ func _harvest_field(field_id: String) -> void:
 	var cost := _field_labor_cost("harvest_field", field)
 	labor_pool -= cost
 	resources["food"] += yield_amount
+	for coords in field.hexes:
+		proved_hexes[_hex_key(coords)] = true
 	field.clear_crop()
 	for coords in field.hexes:
 		var hex = get_hex(coords)
@@ -1083,6 +1182,10 @@ func _harvest_field(field_id: String) -> void:
 			hex.field_id = field.id
 	resources_changed.emit()
 	_log("Harvested %s (+ %d food)." % [crop.display_name, yield_amount])
+
+
+func _hex_key(coords: Vector2i) -> String:
+	return "%d,%d" % [coords.x, coords.y]
 
 
 func toggle_fence(a: Vector2i, b: Vector2i) -> void:
@@ -1148,6 +1251,8 @@ func assign_order(coords: Vector2i, type: String, crop_id: String = "") -> Strin
 			return assign_zone_hex(coords, WorkZoneRes.ZoneType.TRAP, "trap")
 		"build_shelter":
 			return assign_zone_hex(coords, WorkZoneRes.ZoneType.BUILD, "shelter")
+		"build_cabin":
+			return assign_zone_hex(coords, WorkZoneRes.ZoneType.BUILD, "house")
 		"build_barn":
 			return assign_zone_hex(coords, WorkZoneRes.ZoneType.BUILD, "barn")
 		"field":
@@ -1221,7 +1326,8 @@ func holdings_summary() -> String:
 
 
 func resources_summary() -> String:
-	return "%s %d · %s %d · %s %d · %s %d · %s %d" % [
+	var seed_total := int(resources.get("corn_seed", 0)) + int(resources.get("bean_seed", 0))
+	return "%s %d · %s %d · %s %d · %s %d · %s %d · Seeds %d · Tools %d" % [
 		WestTheme.resource_name("food"),
 		total_food(),
 		WestTheme.resource_name("water"),
@@ -1232,6 +1338,8 @@ func resources_summary() -> String:
 		resources.get("wood", 0),
 		WestTheme.resource_name("coins"),
 		resources.get("coins", 0),
+		seed_total,
+		resources.get("tools", 0),
 	]
 
 
@@ -1487,8 +1595,11 @@ func _on_day_ended(ended_day: int) -> void:
 
 
 func _resolve_day(ended_day: int) -> void:
+	if game_lost or game_won:
+		return
 	_sync_calendar_from_turn(ended_day)
 	_advance_fields()
+	person_system.resolve_day(persons, rng, self)
 	_consume_household_daily()
 	_check_family_vitality()
 	var next_day := ended_day + 1

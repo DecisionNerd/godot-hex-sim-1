@@ -203,6 +203,47 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "Cancel"
 
+[node name="ActionsRow3" type="HBoxContainer" parent="UI/PlotPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="PlantCornBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow3"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Plant corn"
+
+[node name="PlantBeansBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow3"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Plant beans"
+
+[node name="ProveUpBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/ActionsRow3"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Prove up claim"
+
+[node name="TradeRow" type="HBoxContainer" parent="UI/PlotPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TradeSelect" type="OptionButton" parent="UI/PlotPanel/Margin/VBox/TradeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TradeBuyBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/TradeRow"]
+layout_mode = 2
+text = "Buy"
+
+[node name="TradeSellBtn" type="Button" parent="UI/PlotPanel/Margin/VBox/TradeRow"]
+layout_mode = 2
+text = "Sell"
+
+[node name="TradePriceLabel" type="Label" parent="UI/PlotPanel/Margin/VBox/TradeRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "$0 / $0"
+vertical_alignment = 1
+
 [node name="LegendLabel" type="Label" parent="UI/PlotPanel/Margin/VBox"]
 layout_mode = 2
 autowrap_mode = 3
