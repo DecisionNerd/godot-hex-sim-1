@@ -1,72 +1,35 @@
-<!-- LLM: This document captures the product's style guide: the design, content, interaction,
-accessibility, and component conventions that make the experience feel coherent. Read
-../0-MISSION.md, ../1-EXPERIENCES.md, and this folder's README first. Interview the user
-about any existing brand, UI kit, design system, Storybook, tokens, screenshots, Figma files,
-or accessibility standards. Keep implementation mechanics in ../3-ENGINEERING/ unless they
-are necessary to explain a design rule. Remove LLM comments as you go. -->
-
 # Style Guide
 
-<!-- LLM: One short paragraph. Describe the role this style guide plays for the project. -->
+Keep everything minimal: map, turn label, short hints. No ornate UI in v1.
 
-_What should stay consistent across the product experience?_
+## Principles
 
-## Design Principles
+- **Simple** — one font, few panels
+- **Map first** — hex grid fills the screen
+- **Plain language** — "Day 3", "Select a plot", not lore text
 
-<!-- LLM: Capture 3-6 principles that guide product decisions and UX trade-offs. These should
-connect to the experience principles in ../1-EXPERIENCES.md. -->
+## Visual
 
-- **_Principle name_** — _what it means in practice._
+- Default Godot theme until custom art
+- Selection: light tint on hex (planned)
+- HUD: top margin, turn + one hint line
 
-## Brand & Voice
+## Terms
 
-<!-- LLM: Document naming, tone, writing style, terminology, and visible personality. Include
-words to use/avoid when that matters. -->
+| Use | Avoid |
+|---|---|
+| hex, patch, block, zone | league, furlong, custom jargon |
+| actor, person | unit, NPC, pawn (in docs) |
+| turn, day, labor | AP, stamina |
 
-- **Tone:** _how the product should sound._
-- **Terminology:** _preferred words and names._
-- **Writing rules:** _short rules for labels, empty states, errors, docs, or prompts._
+## Interaction
 
-## Visual Style
-
-<!-- LLM: Capture visual rules that apply to the product. If the project has no visual UI,
-state what is not applicable and document any terminal, docs, or generated-artifact style
-instead. Link to tokens, CSS, Figma, brand assets, or Storybook when available. -->
-
-- **Color:** _palette, semantic usage, contrast expectations._
-- **Typography:** _font choices, scale, hierarchy._
-- **Spacing & layout:** _grid, density, alignment, rhythm._
-- **Iconography & imagery:** _style, sourcing, usage rules._
-
-## Interaction Patterns
-
-<!-- LLM: Document common interaction rules: navigation, forms, loading, empty/error/success
-states, keyboard behavior, motion, and progressive disclosure. -->
-
-- **Navigation:** _how users move through the product._
-- **Controls:** _buttons, inputs, menus, toggles, and other common controls._
-- **States:** _loading, empty, error, success, disabled._
-- **Motion:** _animation principles or "none" if motion is not part of the experience._
-
-## Components
-
-<!-- LLM: List the reusable components or patterns. Link to code, Storybook, design files, or
-implementation docs where they exist. -->
-
-| Component / pattern | Use it for | Notes / source |
-|---|---|---|
-| _Name_ | _When to use it_ | _Link or rule_ |
+- Click farm plot — select field; farmer walks there (free)
+- Buttons — plant / tend / harvest on selected plot (costs labor)
+- Space — end day
+- Shift+Space — skip to next day with work
 
 ## Accessibility
 
-<!-- LLM: Capture the accessibility bar. Include keyboard behavior, focus, contrast, reduced
-motion, semantic HTML, screen-reader expectations, or CLI equivalents. -->
-
-- _Accessibility rule or target._
-
-## References
-
-<!-- LLM: Link the source of truth for design assets and implementation surfaces. Delete this
-section if there are no references yet. -->
-
-- _Figma / Storybook / token file / component directory / brand asset._
+- `end_turn` on keyboard (done)
+- Don't rely on color alone for selection (add outline when highlighting exists)

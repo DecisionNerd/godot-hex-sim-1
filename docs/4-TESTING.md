@@ -1,67 +1,45 @@
-<!-- LLM: This document explains how we prove the system fulfills its mission, experiences,
-and requirements. It closes the BDD loop: the experiences in 1-EXPERIENCES.md and the
-requirements in 2-REQUIREMENTS.md should each map to something verified here. Interview the
-user about how they actually test (or intend to). Remove LLM comments as you complete each
-section. -->
-
 # Testing
 
-<!-- LLM: One-paragraph summary of the testing philosophy. Ask: "How do you decide something
-is correct and shippable?" Capture the spirit (e.g. "behavior-first, fast feedback"). -->
+Automated tests use [GUT](https://github.com/bitwes/Gut) (v9.5 in `addons/gut/`).
 
-_How do we know the system works?_
+## Run tests
+
+```bash
+./scripts/run_tests.sh
+```
+
+Or:
+
+```bash
+godot --headless -s addons/gut/gut_cmdln.gd -gconfig=.gutconfig.json
+```
+
+In the editor: **Project → Tools → GUT** (after plugin enabled).
 
 ## Strategy
 
-<!-- LLM: Describe the layers of testing and what each is responsible for. Ask the user which
-layers they use and where the emphasis is. Adjust the rows to reality — don't list layers
-they don't have. -->
-
-| Layer | What it verifies | Tools |
+| Layer | Tool | Scope |
 |---|---|---|
-| Unit | _Smallest units of logic_ | _…_ |
-| Integration | _Components working together_ | _…_ |
-| End-to-end / behavior | _User-visible behavior from 1-EXPERIENCES.md_ | _…_ |
+| Unit | GUT | Calendar, farming, food, turns, RNG |
+| Manual | Godot F5 | Map, UI, input |
 
-## Behavior coverage
+## Coverage
 
-<!-- LLM: This is the BDD heart of the doc. Map each key experience / requirement to the
-test(s) that prove it. Reuse the Given/When/Then scenarios from 1-EXPERIENCES.md and the
-requirement IDs from 2-REQUIREMENTS.md. Ask the user to confirm each important behavior has a
-test (or flag it as a gap). -->
+| Area | Tests |
+|---|---|
+| `PlotState` | empty, mature, clear |
+| Calendar | day-in-season, season/year rollover |
+| Farming | plant, harvest, frost, drought, actionable work |
+| Food | 7 days ≈ 2 food consumed |
+| `TurnManager` | actions, advance days, skip-to-work |
+| Weather RNG | same seed → same sequence |
 
-| Experience / Requirement | Scenario (Given/When/Then) | Test |
-|---|---|---|
-| _Experience name / FR-1_ | _Given … When … Then …_ | _path/to/test_ |
+## Manual checks
 
-## Evaluation against the mission
+Godot 4.7 → F5 → `scenes/main.tscn` — select plot, plant/tend/harvest, end day, Shift+Space skip-to-work.
 
-<!-- LLM: Beyond pass/fail tests, how do we evaluate that the system fulfills its MISSION and
-success metrics (from 0-MISSION.md)? This may include metrics, manual evaluation, user
-feedback, or LLM/qualitative evals. Ask the user how they judge mission-level success, not
-just code correctness. -->
+## Test helpers
 
-- _Metric / eval — how it's measured and what "good" looks like_
-
-## Running the tests
-
-<!-- LLM: Give the exact commands to run the suite locally and the expectation (e.g. all green,
-coverage threshold). Ask the user for the real commands. -->
-
-```
-_command to run the tests_
-```
-
-## Continuous integration
-
-<!-- LLM: Describe when tests run automatically and what gates merges/releases. Reference the
-CI config file. Remove if there is no CI yet, but suggest adding it. -->
-
-_What runs in CI, and what must pass before merge/release?_
-
-## Test data & environments
-
-<!-- LLM: How test data and environments are managed (fixtures, seeds, sandboxes, throwaway
-dirs). Remove if not applicable. -->
-
-_How are test data and environments set up and torn down?_
+- `GameState.reset_for_test(seed)` — isolated farm state
+- `GameState.resolve_day(n)` — end-of-day sim without UI
+- `TurnManager.reset_for_test()` — reset turn counter and actions

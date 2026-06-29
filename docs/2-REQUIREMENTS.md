@@ -1,57 +1,79 @@
-<!-- LLM: This document turns the experiences (1-EXPERIENCES.md) into concrete, checkable
-requirements. Read 0-MISSION.md and 1-EXPERIENCES.md first so every requirement traces back
-to an experience or goal. Interview the user to elicit requirements, then write each as a
-testable statement. Give every requirement a stable ID so 4-TESTING.md and ADRs can reference
-it. Remove LLM comments as you complete each section. -->
-
 # Requirements
 
-<!-- LLM: One-paragraph summary of the scope these requirements cover. -->
+Status: **Done** | **Partial** | **Planned**.
 
-_What must the system do, at a high level?_
+## Spatial buckets
 
-## Functional requirements
+One hex = **10 m**. L1–L3 are **fixed spatial buckets**, not nested hex clusters.
 
-<!-- LLM: The behaviors the system must exhibit. Interview the user, then write each as a
-single testable "the system shall..." statement with a stable ID. Group by area if helpful.
-Link each back to the experience it serves. Ask probing questions: inputs, outputs, edge
-cases, error handling, permissions. -->
-
-| ID | Requirement | Traces to |
+| Level | Size | Role |
 |---|---|---|
-| FR-1 | _The system shall …_ | _Experience / goal_ |
-| FR-2 | _The system shall …_ | _Experience / goal_ |
+| L0 hex | 10 m | Authoritative simulation |
+| L1 patch | 100 m | Aggregate cache |
+| L2 block | 1 km | Aggregate cache |
+| L3 zone | 10 km | Aggregate cache |
 
-## Non-functional requirements
-
-<!-- LLM: Qualities and constraints rather than behaviors — performance, reliability,
-security, accessibility, portability, cost. Ask the user for concrete targets where possible
-("responds within Xms", "runs offline", "supports macOS and Linux"). -->
-
-| ID | Requirement | Target / constraint |
+| ID | Requirement | Status |
 |---|---|---|
-| NFR-1 | _Performance / reliability / security / …_ | _Measurable target_ |
-| NFR-2 | _…_ | _…_ |
+| FR-S1 | One hex = 10 m. | Planned |
+| FR-S2 | At map generation, assign each hex `patch_id`, `block_id`, `zone_id` (fixed buckets). | Planned |
+| FR-S3 | Each hex belongs to exactly one patch, one block, one zone. | Planned |
+| FR-S4 | L1–L3 are never authored separately; only aggregated from children. | Planned |
+| FR-S5 | Simulation (spread, local rules) runs on L0 hexes and neighbor hexes only — not via hierarchy. | Planned |
+| FR-S6 | When hex fields change, mark patch → block → zone dirty; recompute only dirty buckets at end of tick. | Planned |
+| FR-S7 | Same field set at all levels; each field has one aggregation rule (SUM, AVG, majority, all, max). | Planned |
 
-## Constraints & assumptions
+**Shared fields (example):** `terrain`, `population`, `food`, `ownership`, `roads`, `forest`,
+`water`, `disease`, `armies`, `passable`.
 
-<!-- LLM: Capture fixed constraints (tech, regulatory, timeline, budget) and assumptions the
-requirements rely on. Ask: "What is non-negotiable? What are we taking for granted that, if
-wrong, would change these requirements?" -->
+## Rendering
 
-- **Constraint:** _…_
-- **Assumption:** _…_
+| ID | Requirement | Status |
+|---|---|---|
+| FR-R1 | One simulation map; no separate authored map per zoom. | Planned |
+| FR-R2 | Renderer selects draw level from camera zoom (hex / patch / block / zone). | Planned |
+| FR-R3 | Hex view draws visible L0 cells; coarser zooms draw one tile per bucket at that level. | Planned |
+| FR-R4 | Render reads from hex state (L0) or aggregate cache (L1–L3), never simulates. | Planned |
 
-## Dependencies
+## Actors and persons
 
-<!-- LLM: External systems, services, libraries, or teams this depends on. Note anything that
-could block delivery. Remove if none. -->
+| Kind | Behavior |
+|---|---|
+| **Actor** | Player or agent; explicit labor choices per day (plant, tend, harvest) |
+| **Person** | Seeded RNG vs fixed probabilities on turn end |
 
-- _Dependency — why it matters_
+At L0 scale (~10 m hex), a person can traverse hundreds of hexes per day. **Position on the map
+is visual** — walking does not consume the daily labor budget.
+
+| ID | Requirement | Status |
+|---|---|---|
+| FR-A1 | Actor shown on map; farm labor consumes daily budget. | Partial |
+| FR-A2 | Person has hex position + probability rules. | Planned |
+| FR-A3 | Persons resolve after actors, before hex sim tick. | Planned |
+| FR-A4 | Seeded RNG; same seed + inputs → same rolls. | Planned |
+| FR-A5 | Agents use same action model as player actor. | Planned |
+| FR-A6 | Click farm plot to select; walk to plot is free. | Done |
+
+## Implemented scaffold
+
+| ID | Requirement | Status |
+|---|---|---|
+| FR-1 | Hex map via `TileMapLayer`. | Done |
+| FR-2 | Mouse → hex. | Done |
+| FR-5–8 | Turn counter, actions, end turn. | Done |
+| FR-11–12 | Click plot to select; farmer walks visually (no labor cost). | Done |
+| FR-20 | HUD turn + hints. | Done |
+
+## Non-functional
+
+| ID | Requirement |
+|---|---|
+| NFR-1 | Godot 4.7, desktop, offline |
+| NFR-2 | Deterministic sim (seeded RNG for persons) |
+| NFR-3 | Dirty aggregates — avoid full-map recompute each tick |
+| NFR-4 | Keep design simple: hex sim + cache + zoom render |
 
 ## Open questions
 
-<!-- LLM: Track unresolved requirement questions here rather than guessing. Each should name
-who needs to answer it. Clear them as they're resolved. -->
-
-- _Question — owner_
+- Bucket geometry: axis-aligned grid buckets vs projected hex coords? — decide at map gen
+- Which person actions in v1? — owner

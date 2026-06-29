@@ -1,57 +1,35 @@
-<!-- LLM: This document describes the intended user experience — the behaviors the product
-must deliver, framed from the user's point of view. It is the bridge between the mission and
-the requirements. Read 0-MISSION.md first so experiences trace back to goals. Interview the
-user section by section. Detailed personas and full journey maps belong in 1-JOURNEYS/ —
-keep this file to the primary experiences and link out for depth. Remove LLM comments as you
-go. -->
-
 # Experiences
 
-<!-- LLM: One-paragraph overview of what using this product is like at its best. Ask:
-"If a user described this product to a friend after a great session, what would they say?" -->
-
-_What is it like to use this, when it works well?_
-
-## Primary users
-
-<!-- LLM: Summarize the main user types here (1-2 sentences each) and link to full personas
-in 1-JOURNEYS/. Ask the user who the product is primarily for, and whether there are distinct
-secondary users. Don't build full personas here — that's 1-JOURNEYS/. -->
-
-- **_User type_** — _who they are, what they want._ See [`1-JOURNEYS/`](1-JOURNEYS/).
+Hex map, turns, actors you control, persons that roll on turn end. Zoom out → patches, blocks,
+zones (same world, simpler drawing).
 
 ## Key experiences
 
-<!-- LLM: This is the core of the document. For each important thing a user does, write it as
-a behavior-driven scenario. Interview the user for the handful of experiences that matter
-most. Use Given/When/Then so they map cleanly onto behavior tests in 4-TESTING.md. Ask for
-each: "What does the user want to accomplish? What's the happy path? What should NOT happen?"
-Duplicate the block below per experience. -->
+### Select plot and work (done)
 
-### _Experience name_
+- **Given** labor left → **When** click a farm plot → **Then** plot selected, farmer walks there (free)
+- **Given** plot selected → **When** plant / tend / harvest → **Then** consume one labor action
 
-> **As a** _user type_
-> **I want** _capability_
-> **So that** _benefit_
+### End day (done)
 
-- **Given** _starting context_
-- **When** _the user acts_
-- **Then** _the expected, observable outcome_
+### Zoom the map (planned)
 
-<!-- LLM: Add edge cases / things that must not happen for this experience. -->
+> **As a** player  
+> **I want** zoom to change detail, not a different world  
+> **So that** I see hexes up close and zones when far out
 
-## Experience principles
+- **Given** the county map
+- **When** I zoom in or out
+- **Then** renderer shows hexes, patches, blocks, or zones from the same sim data
 
-<!-- LLM: Capture the cross-cutting qualities the experience must have (e.g. fast, forgiving,
-keyboard-first, works offline). Ask: "What should always be true of how this feels, across
-every screen or command?" -->
+### See spread on the map (planned)
 
-- _Principle 1_
-- _Principle 2_
+- **Given** disease (or similar) on a hex
+- **When** turns pass
+- **Then** neighbor hexes change first; patch/block/zone summaries update after the tick
 
-## Out of scope
+## Principles
 
-<!-- LLM: Experiences explicitly NOT being designed for, at least for now. Keep this honest;
-it pairs with the mission's non-goals. -->
-
-- _Out-of-scope experience_
+- Sim on hexes; summaries are derived
+- Deterministic persons (seeded)
+- Simple

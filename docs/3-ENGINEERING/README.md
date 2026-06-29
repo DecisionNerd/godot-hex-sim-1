@@ -1,39 +1,23 @@
-<!-- LLM: This folder holds technical documentation that supports ../3-ARCHITECTURE.md and
-../4-TESTING.md — things like setup guides, operational runbooks, API references, and the
-Architecture Decision Records in ADRs/. Interview the user about what engineering docs exist
-or are needed. Create focused files per topic. Update the index as files are added. Remove
-LLM comments as you go. -->
-
 # Engineering
 
-This folder holds the deeper technical documentation behind
-[`../3-ARCHITECTURE.md`](../3-ARCHITECTURE.md) and [`../4-TESTING.md`](../4-TESTING.md),
-including the project's decision records.
+Technical documentation supporting [`../3-ARCHITECTURE.md`](../3-ARCHITECTURE.md) and
+[`../4-TESTING.md`](../4-TESTING.md).
 
-## What lives here
+## Index
 
-<!-- LLM: Create the documents that fit this project. Common ones: -->
-
-- **Development setup** — _how to get a working dev environment._
-- **Build & release** — _how the project is built, versioned, and shipped._
-- **Operations / runbook** — _how it's run, monitored, and recovered._
-- **API / interface reference** — _contracts other code depends on._
-- **[ADRs/](ADRs/)** — _Architecture Decision Records (one per significant decision)._
+| Document | Description |
+|---|---|
+| [setup.md](setup.md) | Godot install, first run, project layout |
+| [godot-features.md](godot-features.md) | Engine features to use and avoid |
+| [ADRs/](ADRs/) | Architecture Decision Records |
 
 ## Decision records
 
-Significant engineering and product decisions are recorded as ADRs in [`ADRs/`](ADRs/).
-Create the next one with:
+Significant decisions are recorded in [`ADRs/`](ADRs/). To add one manually, copy the template
+from an existing ADR (e.g. `0001-hex-map-tilemap-layer.md`) with the next number.
+
+Or use docgen if installed:
 
 ```
 docgen add adr <short-slug>
 ```
-
-## Index
-
-<!-- LLM: List the engineering documents in this folder with a one-line description each.
-Update whenever a file is added. -->
-
-| Document | Description |
-|---|---|
-| _filename.md_ | _what it covers_ |

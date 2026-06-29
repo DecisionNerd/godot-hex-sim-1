@@ -1,7 +1,3 @@
-<!-- LLM: This file is the index for the Architecture Decision Records. It is NOT itself an
-ADR. Keep it as a short explainer plus a table of the decisions recorded so far. When you add
-or fill in an ADR, add a row to the log below. Remove LLM comments as you go. -->
-
 # Architecture Decision Records
 
 An **Architecture Decision Record (ADR)** captures one significant decision — the context,
@@ -10,12 +6,13 @@ code. Decisions are immutable once accepted: to change one, add a new ADR that s
 
 ## Creating an ADR
 
+Copy an existing ADR file with the next number, or:
+
 ```
 docgen add adr <short-slug>
 ```
 
-This creates the next-numbered record, e.g. `0001-<short-slug>.md`. Fill it in (the file
-carries inline guidance), then add a row to the log below.
+Add a row to the decision log below when accepted.
 
 ## Status values
 
@@ -26,8 +23,10 @@ carries inline guidance), then add a row to the log below.
 
 ## Decision log
 
-<!-- LLM: Keep this table in sync with the ADR files in this folder. One row per ADR. -->
-
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| _0001_ | _short title_ | _Proposed_ | _YYYY-MM-DD_ |
+| [0001](0001-hex-map-tilemap-layer.md) | Hex map via TileMapLayer | Accepted | 2026-06-28 |
+| [0002](0002-turn-based-no-physics.md) | Turn-based grid, no physics | Accepted | 2026-06-28 |
+| [0003](0003-turn-manager-autoload.md) | TurnManager autoload | Accepted | 2026-06-28 |
+| [0004](0004-spatial-scales-and-entities.md) | Spatial buckets and actor/person model | Accepted | 2026-06-28 |
+| [0005](0005-sim-aggregate-render-split.md) | Hex sim, aggregate cache, zoom rendering | Accepted | 2026-06-28 |

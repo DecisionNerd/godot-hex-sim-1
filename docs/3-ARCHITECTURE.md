@@ -1,78 +1,224 @@
-<!-- LLM: This document explains how the system is designed to meet the requirements
-(2-REQUIREMENTS.md). Read the prior docs first so the architecture clearly serves the
-requirements and experiences. Interview the user about the actual or intended design — don't
-invent components. Where a significant choice was made between alternatives, record it as an
-ADR in 3-ENGINEERING/ADRs/ and link to it here rather than arguing the decision inline.
-Remove LLM comments as you fill each section. -->
-
 # Architecture
 
-<!-- LLM: One-paragraph overview of the system shape (e.g. "a single-binary CLI", "a web app
-with a Postgres backend"). Give the reader the mental model before the detail. -->
+Offline Godot 4 game: one **hex simulation** (L0), **aggregate caches** (L1–L3), **zoom-based
+rendering**. Turn loop + actors + persons. No server, no physics.
 
-_What kind of system is this, in one paragraph?_
+Three separate jobs:
 
-## Context diagram
-
-<!-- LLM: Show the system in its environment — its users and the external systems it talks to.
-A simple ASCII/Mermaid diagram or a bullet list of "actor → system → external service" is
-fine. Ask the user what's inside the boundary vs. outside it. -->
+| Job | Where | Rule |
+|---|---|---|
+| **Simulation** | L0 hexes only | All propagation (disease, movement, etc.) is hex → neighbor hex |
+| **Aggregation** | L1 patch, L2 block, L3 zone | Cached summaries; recomputed when hexes change |
+| **Rendering** | Camera zoom | Draw hexes, patches, blocks, or zones — one map, no duplicate tiles |
 
 ```
-_actor_ → [ this system ] → _external service_
+Player → UI → TurnManager → Actors / Persons
+                          → HexSim (L0 only)
+                          → AggregateCache (dirty L1→L3)
+                          → MapRenderer (zoom → level)
 ```
+
+## Spatial buckets (not hex clusters)
+
+The hierarchy is **fixed spatial buckets** over a single hex grid. Do **not** nest hex shapes inside
+hex shapes.
+
+| Level | Name | Size |
+|---|---|---|
+| L0 | hex | 10 m |
+| L1 | patch | 100 m |
+| L2 | block | 1 km |
+| L3 | zone | 10 km |
+
+At **map generation**, each hex gets permanent bucket IDs:
+
+```text
+hex.patch_id
+hex.block_id
+hex.zone_id
+```
+
+Each hex belongs to exactly one patch, one block, and one zone. IDs are never inferred at runtime
+from neighbor topology — only from the bucket assignment baked into the map.
+
+## Simulation (L0 only)
+
+Hexes are the **authoritative state**. All spread and local rules run here.
+
+Example — disease:
+
+```text
+Hex A (infected)
+   ↓
+Neighbor hexes
+   ↓
+Neighbor hexes
+```
+
+Only hex data changes during the tick. The hierarchy is **not** part of the propagation path.
+
+**Turn end (sim order):**
+
+```text
+1. Actors take explicit actions
+2. Persons resolve (seeded RNG, fixed order)
+3. Hex sim tick (spread, work, etc.) — hex → hex only
+4. Flush dirty aggregates (see below)
+5. turn_number++
+```
+
+## Aggregation (cache, not simulation)
+
+L1–L3 store the **same field names** as hexes, derived from children below.
+
+| Field | Hex rule | Patch rule | Block / zone rule |
+|---|---|---|---|
+| `population` | source | `SUM(hex)` | `SUM(patch)` / `SUM(block)` |
+| `food` | source | `SUM` | `SUM` |
+| `forest` | source | `AVG` | `AVG` |
+| `terrain` | source | `majority` | `majority` |
+| `owner` | source | `majority` | `majority` |
+| `passable` | source | `all` | `all` |
+| `road_level` | source | `max` | `max` |
+| `water` | source | `SUM` or `AVG` | same fn as patch |
+| `disease` | source | `SUM` or `max` | same fn as patch |
+| `armies` | source | `SUM` | `SUM` |
+
+Define one aggregation function per field; reuse at every level.
+
+**Never propagate through the hierarchy for simulation.** After hex changes:
+
+```text
+Changed hexes
+      ↓
+Recompute affected patch(es)
+      ↓
+Recompute affected block(s)
+      ↓
+Recompute affected zone(s)
+```
+
+### Dirty updates
+
+Do not recompute the whole map every tick.
+
+When a hex changes:
+
+```text
+Hex dirty → patch dirty → block dirty → zone dirty
+```
+
+End of tick:
+
+```text
+for each dirty patch:   aggregate from its hexes
+for each dirty block:   aggregate from its patches
+for each dirty zone:    aggregate from its blocks
+clear dirty sets
+```
+
+## Rendering
+
+No separate map per zoom level. One simulation; renderer picks granularity.
+
+| Zoom | Draw |
+|---|---|
+| Near | L0 hexes (visible window only) |
+| Medium | L1 — one tile per patch |
+| Far | L2 — one tile per block |
+| Strategic | L3 — one tile per zone |
+
+```text
+current_zoom → pick level → read aggregate or hex buffer → draw
+```
+
+Predictable cost:
+
+| Zoom | Rough draw count |
+|---|---|
+| Hex | Many (cull to viewport) |
+| Patch | Thousands |
+| Block | Hundreds |
+| Zone | Dozens |
+
+Patch/block/zone tiles can be simple colored quads or one atlas tile per bucket — still sourced
+from aggregate data, not a second authored map.
+
+## Entities
+
+### Actor
+
+Player or agent. Shown at `hex_coords` on the map. **Labor** (plant, tend, harvest) consumes
+the daily budget. Walking between plots is free — at 10 m/hex a worker crosses hundreds of tiles
+per day.
+
+### Person
+
+Non-player. `hex_coords`, rules `{ action, probability }`. On turn end: seeded `rng.randf()` vs
+probabilities; stable sort order by id.
+
+### RNG
+
+One `RandomNumberGenerator` on `GameState` (planned). Person rolls only. Save includes seed.
 
 ## Components
 
-<!-- LLM: Break the system into its major parts. For each, state its single responsibility and
-what it depends on. Ask the user to walk through the pieces; capture one row per component.
-Keep responsibilities crisp — if a component does "everything", probe to split it. -->
-
-| Component | Responsibility | Depends on |
-|---|---|---|
-| _Name_ | _What it owns_ | _Other components / services_ |
+| Component | Role |
+|---|---|
+| `TurnManager` | Turn #, actions, signals |
+| `main.gd` | Input, HUD |
+| `Unit` → `Actor` | L0 position, visual walk (rename planned) |
+| `TileMapLayer` | L0 visuals (hex zoom) |
+| **`HexSim`** (planned) | L0 state + hex-neighbor propagation |
+| **`AggregateCache`** (planned) | patch/block/zone structs, dirty flush |
+| **`MapRenderer`** (planned) | Zoom → draw level |
+| **`GameState`** (planned) | Seed, bucket maps, entity lists |
+| **`PersonSystem`** (planned) | End-turn person rolls |
 
 ## Data model
 
-<!-- LLM: Describe the key entities and their relationships, or the main data structures /
-state. Link to a schema file if one exists. Ask: "What are the nouns the system stores or
-passes around, and how do they relate?" Remove if the system is essentially stateless. -->
+**Hex (L0)** — authoritative:
 
-_Key entities and relationships._
+```text
+coords, patch_id, block_id, zone_id
+terrain, population, food, ownership, roads, forest, water, disease, armies, passable, ...
+```
+
+**Patch / block / zone** — cached aggregates, same keys, plus `dirty: bool`.
+
+**Actor:** `id`, `hex`, `is_player`, `is_agent`
+
+**Person:** `id`, `hex`, `rules: [{ action, p }]`
 
 ## Key flows
 
-<!-- LLM: Trace 1-3 important paths through the system end-to-end (e.g. the main request, the
-main command). Number the steps and name the components involved. These should line up with
-the key experiences in 1-EXPERIENCES.md. -->
+### Select plot + labor (done)
 
-### _Flow name_
+Click farm plot → `local_to_map` → select → `walk_to()` (free tween). Plant/tend/harvest →
+`consume_action()` on selected plot.
 
-1. _Step — which component_
-2. _Step — which component_
+### Sim + aggregate (planned)
 
-## Cross-cutting concerns
+Disease on hex A → spread to neighbor hexes → each changed hex marks patch/block/zone dirty →
+end tick flush aggregates.
 
-<!-- LLM: How the design handles concerns that span components: error handling, logging,
-configuration, auth/security, performance, observability. Ask the user which of these apply
-and how they're addressed. Drop the ones that don't apply. -->
+## Godot pieces
 
-- **Error handling:** _…_
-- **Configuration:** _…_
-- **Security:** _…_
-- **Observability:** _…_
+`TileMapLayer` (hex view), autoloads, signals, `Resource`, seeded RNG, `Camera2D` zoom for level
+pick, optional second draw path for patch/block/zone quads.
+
+Avoid: physics, NavigationAgent2D, multiplayer, separate TileMaps per zoom.
 
 ## Decisions
 
-<!-- LLM: List the significant architectural decisions, each linking to its ADR. Do not
-re-argue them here. If no ADRs exist yet, prompt the user: "What were the big either/or
-choices? Each deserves an ADR." Use `docgen add adr <slug>` to create one. -->
+- [ADR-0001 — Hex map via TileMapLayer](3-ENGINEERING/ADRs/0001-hex-map-tilemap-layer.md)
+- [ADR-0002 — Turn-based, no physics](3-ENGINEERING/ADRs/0002-turn-based-no-physics.md)
+- [ADR-0003 — TurnManager autoload](3-ENGINEERING/ADRs/0003-turn-manager-autoload.md)
+- [ADR-0004 — Spatial buckets and entities](3-ENGINEERING/ADRs/0004-spatial-scales-and-entities.md)
+- [ADR-0005 — Hex sim, aggregate cache, zoom render](3-ENGINEERING/ADRs/0005-sim-aggregate-render-split.md)
 
-- _[ADR-0001 — short title](3-ENGINEERING/ADRs/0001-*.md)_
+## Risks
 
-## Risks & trade-offs
-
-<!-- LLM: Capture where the design is knowingly weak or where a trade-off was accepted, and
-why. Honest risk-listing here saves pain later. -->
-
-- _Risk / trade-off — mitigation or rationale_
+- Bucket assignment must be stable and saved with the map
+- Dirty flush order: patches before blocks before zones
+- Renderer and sim must agree on field list per level
